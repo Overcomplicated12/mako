@@ -51,7 +51,8 @@ namespace janus
                                 uint64_t prevLogTerm,
                                 uint64_t commitIndex,
                                 const janus::Command &cmd,
-                                uint64_t cmdLogTerm)
+                                uint64_t cmdLogTerm,
+                                uint64_t trace_request_id)
   {
     // Allocate response data with shared_ptr; the async callback captures it
     // and signals response->event when the legacy Future completes.
@@ -76,7 +77,7 @@ namespace janus
       FutureAttr fuattr;
       // Capture response shared_ptr so FutureAttr can run after this function
       // returns without dangling response/event storage.
-      fuattr.callback = [response, site_id](rusty::Arc<Future> fu)
+      fuattr.callback = [response, site_id, trace_request_id](rusty::Arc<Future> fu)
       {
         if (commo_future_failed(fu->get_error_code()))
         {
@@ -90,6 +91,10 @@ namespace janus
         uint64_t ack_type = 0;
         fu->get_reply() >> status >> term >> last_log_index >> ack_type;
         response->apply_reply(status, term, last_log_index, ack_type);
+        if (trace_request_id != 0) {
+          Log_info("[APPEND_PIPELINE_TRACE] phase=reply_received request_id=%lu follower=%d status=%lu",
+                   trace_request_id, site_id, status);
+        }
         Log_debug("[APPEND_RPC] Success response from site %d: status=%lu, term=%lu, lastLogIndex=%lu, ackType=%lu",
                   site_id, response->status, response->term, response->last_log_index, response->ack_type);
         response->event->set(1);

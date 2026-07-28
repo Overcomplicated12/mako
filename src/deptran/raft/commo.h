@@ -665,7 +665,8 @@ friend class RaftProxy;
                     uint64_t prevLogTerm,
                     uint64_t commitIndex,
                     const janus::Command& cmd,
-                    uint64_t cmdLogTerm
+                    uint64_t cmdLogTerm,
+                    uint64_t trace_request_id = 0
                     );
 
   // @unsafe - C-style cast, raw pointers

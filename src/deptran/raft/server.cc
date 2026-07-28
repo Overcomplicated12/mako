@@ -170,6 +170,15 @@ uint64_t GetAppendEntriesMaxInflight() {
       1, std::min<uint64_t>(max_inflight, kMaxInflightLimit));
 }
 
+// @safe - Enables the verbose send/poll/reply timeline used by the dedicated
+// pipeline integration test.  It is disabled by default to keep the replication
+// hot path free of per-request info logs in production.
+bool GetAppendEntriesPipelineTraceEnabled() {
+  static const bool enabled = ParseEnvUint64OrDefault(
+      "MAKO_RAFT_APPEND_PIPELINE_TRACE", 0) != 0;
+  return enabled;
+}
+
 // @safe - Splits the currently available backlog across the remaining window
 // slots without exceeding the configured AppendEntries batch limit.
 uint64_t GetAppendEntriesPipelineBatchSize(uint64_t remaining_entries,
@@ -1521,6 +1530,7 @@ void RaftServer::HeartbeatLoop() {
   // signal cheap while making it possible to verify that the configured window
   // is actually being exercised by a workload with enough backlog.
   std::map<siteid_t, size_t> append_pipeline_high_water;
+  uint64_t append_pipeline_trace_request_id = 0;
   looping_ = true;
   while(looping_) {
     uint64_t term = 0;
@@ -1816,6 +1826,10 @@ void RaftServer::HeartbeatLoop() {
 
         // Send RPC (non-blocking - just initiates the async call)
         // Response is allocated with shared_ptr - callback captures it to ensure memory validity
+        const uint64_t trace_request_id =
+            GetAppendEntriesPipelineTraceEnabled()
+                ? ++append_pipeline_trace_request_id
+                : 0;
         pending->response = commo()->SendAppendEntries2(site_id,
                                               partition_id,
                                               -1,
@@ -1827,10 +1841,17 @@ void RaftServer::HeartbeatLoop() {
                                               prevLogTerm,
                                               current_commit_index,
                                               cmd,
-                                              cmdLogTerm);
+                                              cmdLogTerm,
+                                              trace_request_id);
 
         pending_rpcs.push_back(std::move(pending));
         const size_t observed_inflight = pipeline_slot + 1;
+        if (GetAppendEntriesPipelineTraceEnabled()) {
+          Log_info("[APPEND_PIPELINE_TRACE] phase=send request_id=%lu kind=%s follower=%d outstanding=%zu/%lu range=(%lu,%lu]",
+                   trace_request_id, cmd.has_value() ? "data" : "heartbeat",
+                   site_id, observed_inflight, max_inflight, prevLogIndex,
+                   pending_rpcs.back()->sent_last_log_index);
+        }
         auto& high_water = append_pipeline_high_water[site_id];
         if (observed_inflight > high_water) {
           high_water = observed_inflight;
@@ -1866,6 +1887,11 @@ void RaftServer::HeartbeatLoop() {
       const uint64_t response_poll_time_us = Time::now(true);
       bool stepped_down = false;
 
+      if (GetAppendEntriesPipelineTraceEnabled()) {
+        Log_info("[APPEND_PIPELINE_TRACE] phase=poll_begin pending=%zu",
+                 pending_rpcs.size());
+      }
+
       for (auto& pending_ptr : pending_rpcs) {
         if (!IsLeader()) {
           break;
@@ -1898,6 +1924,11 @@ void RaftServer::HeartbeatLoop() {
           continue;
         }
 
+        if (GetAppendEntriesPipelineTraceEnabled()) {
+          Log_info("[APPEND_PIPELINE_TRACE] phase=reply follower=%d range=(%lu,%lu] status=%lu",
+                   pending.follower_id, pending.sent_prev_log_index,
+                   pending.sent_last_log_index, resp.status);
+        }
         pending.retire = true;
         std::lock_guard<std::recursive_mutex> lock(mtx_);
         auto& next_index = next_index_[pending.follower_id];
