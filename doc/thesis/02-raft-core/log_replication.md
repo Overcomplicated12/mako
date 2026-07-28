@@ -59,9 +59,12 @@ HeartbeatLoop():
     [B] If !IsLeader(): continue
 
     [C] FOR each peer in next_index_:
-      [C1] Compute new commitIndex (see Section 5)
-      [C2] Prepare and send AppendEntries (see below)
-      [C3] Process response (see Section 4)
+      [C1] Compute the next unsent ordered range
+      [C2] Fill up to MAKO_RAFT_APPEND_MAX_INFLIGHT requests
+    [D] Poll completed in-flight responses
+      [D1] Update acknowledged progress or back off the oldest rejection
+      [D2] Leave incomplete requests pending across heartbeat rounds
+    [E] Compute new commitIndex (see Section 5)
 ```
 
 **Wake mechanism**: The loop sleeps on `ready_for_replication_` (an `IntEvent`). It wakes either:
@@ -157,15 +160,16 @@ SendAppendEntries2(site_id, par_id, ..., cmd, ..., ret_status*, ret_term*, ret_l
   +-- RETURN IntEvent (caller waits on it)
 ```
 
-The caller waits with a 500ms timeout (server.cc:847):
-```cpp
-r->wait(500000);
-if (r->status_.get() == Event::TIMEOUT) {
-    continue;  // Skip this follower, try again next heartbeat
-}
-```
+The heartbeat loop does not block on this event. It retains each request in a
+per-follower bounded window (4 by default), polls completion on later heartbeat
+iterations, and retires an unresolved range after 100ms. This prevents a slow
+or partitioned follower from stalling either other followers or subsequent
+ordered ranges for the same follower.
 
-This bounded wait prevents a slow or partitioned follower from stalling the leader's replication to other followers.
+The window is configured with `MAKO_RAFT_APPEND_MAX_INFLIGHT`; the existing
+`MAKO_RAFT_APPEND_BATCH_MAX_ENTRIES` limit still caps each individual payload.
+When enough backlog exists, the leader splits it across the available slots so
+several consecutive batches can be on the wire simultaneously.
 
 ---
 
@@ -288,13 +292,18 @@ After receiving a response from a follower, the leader handles four cases (serve
 
 **Case 2: Log Conflict** (`ret_status == 0`)
 - The follower rejected because its log doesn't match at `prevLogIndex`.
-- Backtrack `next_index_` (see Section 4.2).
+- If this is the earliest unresolved pipelined range, backtrack `next_index_`
+  and retire all later dependent ranges (see Section 4.2).
+- If an earlier range is still unresolved, treat the rejection as speculative:
+  the follower may simply have received the ranges out of order. Retire the
+  dependent range and retry after the prefix resolves.
 
 **Case 3: Success** (`ret_status == true`)
-- Update tracking indices:
-  - Non-batch: `match_index_ = next_index_; next_index_++`
-  - Batch: `match_index_ = ret_last_log_index; next_index_ = ret_last_log_index + 1`
-- Safety check: cap `match_index_` at `lastLogIndex`
+- Advance `match_index_` monotonically through the last index carried by this
+  request, even if responses arrive out of order.
+- Set `next_index_` to at least `match_index_ + 1`.
+- Do not use a larger follower-reported last index: that suffix was not proven
+  to match the leader by this request.
 
 ### 4.2 Log Reconciliation — Backtracking next_index_
 

@@ -241,15 +241,29 @@ If any fail:
 
 ### Parallel Replication
 
-AppendEntries RPCs are sent to all followers in parallel using async callbacks:
+AppendEntries RPCs are sent to all followers in parallel using async callbacks.
+Each follower also has a bounded pipeline, so a leader can overlap multiple
+ordered log ranges to the same follower instead of waiting for one range to
+finish before sending the next:
 
 ```cpp
 // In HeartbeatLoop (server.cc)
 for (each follower) {
-    commo->SendAppendEntries2(follower, cmd, prevLogIndex, prevLogTerm, ...);
-    // Non-blocking: callback processes response
+    while (inflight[follower] < max_inflight && follower_has_work) {
+        commo->SendAppendEntries2(follower, next_ordered_range, ...);
+    }
 }
 ```
+
+The default window is 4 requests per follower. The leader divides the current
+backlog over the available window slots (subject to the batch-size cap), keeps
+the requests alive across heartbeat iterations, and polls replies without
+blocking. A successful reply advances `match_index_` only through the range
+actually carried by that request; it never trusts an unverified suffix reported
+by the follower. A rejection for a later speculative range is ignored while an
+earlier prefix is unresolved. A rejection for the earliest unresolved range
+backs off `next_index_` and retires all later dependent ranges for idempotent
+retry. Snapshot transfer remains exclusive with the AppendEntries window.
 
 ### Commit Index Calculation
 
@@ -783,6 +797,8 @@ For multi-shard deployments:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MAKO_RAFT_HEARTBEAT_INTERVAL_US` | `5000` (prod) / `100000` (test) | Heartbeat interval in microseconds. Overrides the compile-time default at `Setup()` time. Also controls the election-timeout sleep range (`2x`--`4x` the interval). |
+| `MAKO_RAFT_APPEND_MAX_INFLIGHT` | `4` | Maximum outstanding AppendEntries RPCs per follower. Values are clamped to the safe range 1-64. |
+| `MAKO_RAFT_APPEND_BATCH_MAX_ENTRIES` | `256` | Maximum entries in one AppendEntries batch. A backlog may be divided into several batches to fill the per-follower pipeline. |
 | `MAKO_RAFT_PERSISTENCE` | (unset) | Set to `1` or `true` to enable log persistence |
 | `MAKO_RAFT_ASYNC_PERSISTENCE` | (unset) | Set to `1` or `true` for async disk persistence |
 | `MAKO_RAFT_PERSISTENCE_PATH` | `/tmp` | Base directory for persistence files |
