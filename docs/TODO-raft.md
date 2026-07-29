@@ -417,18 +417,25 @@ documented inline + in the design doc.
 
 ### 8.1.b — Give `RaftServer` a `TransportProxy transport_`
 
-- [ ] `src/deptran/raft/server.h`: add private member
-  `janus::raft::TransportProxy transport_;` and an accessor
-  `TransportProxy& transport()`. Include `transport.hpp` at the top.
-- [ ] `src/deptran/raft/server.cc` (or wherever `RaftServer` is
-  initialized — likely in `Setup()` or the constructor):
-  construct `transport_ = make_rrr_transport(commo_, site_id_,
-  partition_id_);` once `commo_` is non-null. `commo_` stays live —
-  `RrrTransportAdapter` holds a non-owning pointer into it.
-- [ ] No outbound call-site changes yet; this step just plumbs the
-  member so the rest of 8.1 can reference it.
-- [ ] Gate: deptran_server links, lab test passes tests 1-60.
-- [ ] **Commit**: `raft: phase 8.1b — wire TransportProxy onto RaftServer`.
+Done in `7d1f9fa1` (`raft: phase 8.1b wire TransportProxy onto
+RaftServer`). `RaftServer` is constructed before `commo_` is wired, so the
+move-only proxy is stored as `rusty::Option<TransportProxy>` until an adapter
+can safely borrow the frame-owned communicator.
+
+- [x] `src/deptran/raft/server.h`: add the optional private
+  `janus::raft::TransportProxy` member and a checked `transport()` accessor;
+  include `transport.hpp`.
+- [x] `src/deptran/raft/server.cc`: initialize the adapter idempotently in
+  `Setup()` once `commo_` is non-null. The special Raft test restart path,
+  which deliberately bypasses `Setup()`, initializes it immediately after
+  wiring its replacement communicator.
+- [x] No outbound call-site changes; this step only plumbs the member for the
+  remaining 8.1 migration.
+- [ ] Gate: deptran_server links, lab test passes tests 1-60. Focused
+  `test_raft_rrr_transport_compile`, `test_raft_quorum`, and
+  `test_raft_test_cluster` passed; full validation remains blocked by the
+  local CMake 4.3 `import std` configuration gate.
+- [x] **Commit**: `raft: phase 8.1b — wire TransportProxy onto RaftServer`.
 
 ### 8.1.c — Migrate `BroadcastVote` (election path)
 
@@ -471,6 +478,18 @@ else if (sp_quorum->no()) { ... }
 
 Location: `src/deptran/raft/server.cc:3164` (main HeartbeatLoop),
 line 1647 (`SendAppendEntries2`, speculative path).
+
+- [x] Add an integration regression test proving that the current
+  `RaftCommo` path can pipeline data-bearing `AppendEntries` requests per
+  follower. [26:07:28] Added
+  `examples/mako-raft-tests/run_test_append_entries_pipeline.sh` in commit
+  `b78dc410`. The new script leaves existing test scripts untouched, runs the
+  existing five-replica `testPreferredReplicaLogReplication` workload with a
+  four-request window, and verifies: all replicas complete 25/25 operations;
+  every follower reaches a 4/4 high-water mark with log-bearing ranges; and
+  request IDs 2--4 are sent before the callback for request ID 1 is received.
+  The test-only `APPEND_PIPELINE_TRACE` records that callback ordering. It
+  passed after `ninja -C build -j4 testPreferredReplicaLogReplication`.
 
 Current: `commo()->SendAppendEntries(..., shared_ptr<cmd>, ...)`
 returns `shared_ptr<SendAppendEntriesResults>`. Callers read `res->done`,
