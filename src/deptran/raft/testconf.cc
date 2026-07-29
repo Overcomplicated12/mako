@@ -707,6 +707,7 @@ void RaftTestConfig::Restart(siteid_t svr) {
 
   // Set commo_ in server before initializing
   frame->svr_->commo_ = frame->commo_.get();
+  frame->svr_->InitializeTransport();
 
   // Manually initialize persistence and load state (without starting coroutines)
   const char* persistence_flag = std::getenv("MAKO_RAFT_PERSISTENCE");

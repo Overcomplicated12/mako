@@ -13,6 +13,7 @@
 #include "file_snapshot_manager.hpp"
 #include "quorum.hpp"
 #include "replicated_db.h"
+#include "rrr_transport.hpp"
 
 import std;
 
@@ -909,8 +910,26 @@ void RaftServer::StartApplyThread() {
   // invocation when it next pulls from apply_queue_.
 }
 
+// @unsafe - constructs an adapter borrowing the RaftFrame-owned communicator.
+void RaftServer::InitializeTransport() {
+  if (transport_.is_some()) {
+    return;
+  }
+
+  RaftCommo* c = commo();
+  if (c == nullptr) {
+    Log_warn("[RAFT-TRANSPORT] site {} partition {} has no communicator during initialization",
+             site_id_, partition_id_);
+    return;
+  }
+
+  transport_ = rusty::Some(raft::make_rrr_transport(c, site_id_, partition_id_));
+}
+
 // @unsafe - Server setup (Time::now, Log_debug, Fiber::create_run marked safe via @external)
 void RaftServer::Setup() {
+  InitializeTransport();
+
   // Record startup time for grace period logic
   leadership_core_.set_startup_timestamp(Time::now(false));
 

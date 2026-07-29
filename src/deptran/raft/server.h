@@ -5,6 +5,7 @@
 #include "../scheduler.h"
 #include "../classic/tpc_command.h"
 #include "commo.h"
+#include "transport.hpp"
 #include <deque>
 #include <rusty/box.hpp>
 #include <rusty/arc.hpp>
@@ -1506,6 +1507,15 @@ class RaftServer : public TxLogServer {
   bool looping_ = false;
   bool heartbeat_ = true;
   bool heartbeat_setup_ = false;
+
+  // The server is constructed before ServerWorker wires commo_.  Keep the
+  // move-only transport optional until that borrowed communicator exists.
+  rusty::Option<raft::TransportProxy> transport_{rusty::None};
+
+
+  // @unsafe - creates an adapter that borrows the communicator owned by
+  // RaftFrame. It is idempotent because restart paths may call it explicitly.
+  void InitializeTransport();
 	enum { STOPPED, RUNNING } status_;
 	rusty::Function<void(bool)> leader_change_cb_;
 
@@ -1842,6 +1852,12 @@ class RaftServer : public TxLogServer {
   // The owning RaftFrame/RaftWorker lifetime must outlive this server use.
   RaftCommo* commo() {
     return (RaftCommo*) commo_;
+  }
+
+  // @safe - valid after initialization; callers receive the owned adapter.
+  raft::TransportProxy& transport() {
+    verify(transport_.is_some());
+    return transport_.as_mut().unwrap();
   }
 
   slotid_t min_active_slot_ = 1; // anything before (lt) this slot is freed
