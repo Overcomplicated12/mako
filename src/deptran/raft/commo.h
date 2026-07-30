@@ -87,79 +87,6 @@ inline bool commo_notify_restart_is_down(NotifyRestartStatus status) {
 }
 /*RUSTYCPP:GEN-END id=commo.notify_restart_helpers*/
 
-#if RUSTYCPP_RUST
-pub fn commo_quorum_should_record_vote(vote_yes: bool, voter_id: u16) -> bool {
-    vote_yes && voter_id != 0
-}
-
-pub fn commo_quorum_should_advance_term(term: u64, highest_term: u64) -> bool {
-    term > highest_term
-}
-#endif
-/*RUSTYCPP:GEN-BEGIN id=commo.quorum_decisions version=1 rust_sha256=19672f928ad7ccafc3eff033ad9b0e0f264846beeda995bb311705d367052a3c*/
-inline bool commo_quorum_should_record_vote(bool vote_yes, uint16_t voter_id);
-inline bool commo_quorum_should_advance_term(uint64_t term, uint64_t highest_term);
-
-inline bool commo_quorum_should_record_vote(bool vote_yes, uint16_t voter_id) {
-    return rusty::detail::deref_if_pointer_like(vote_yes) && (rusty::detail::deref_if_pointer_like(voter_id) != static_cast<uint16_t>(0));
-}
-
-inline bool commo_quorum_should_advance_term(uint64_t term, uint64_t highest_term) {
-    return rusty::detail::deref_if_pointer_like(term) > rusty::detail::deref_if_pointer_like(highest_term);
-}
-/*RUSTYCPP:GEN-END id=commo.quorum_decisions*/
-
-// @unsafe - owns the flattened QuorumEvent through the upstream composition
-// wrapper and tracks voters behind a std::mutex.
-class RaftVoteQuorumEvent: public QuorumEventWrapper {
- private:
-  // SPECULATIVE VOTING: Track which sites voted yes (memory votes)
-  std::set<siteid_t> spec_voters_;
-  std::mutex voters_mtx_;
-
- public:
-  using QuorumEventWrapper::QuorumEventWrapper;
-  // @safe
-  bool HasAcceptedValue() {
-    return false;
-  }
-
-  // @safe - Extended to track voter site IDs for speculative voting
-  void FeedResponse(bool y, ballot_t term, siteid_t voter_id = 0) {
-    if (y) {
-      // @unsafe
-      { vote_yes(); }  // 1 unsafe line: calls @unsafe parent method
-      // Track the voter for speculative voting
-      if (commo_quorum_should_record_vote(y, voter_id)) {
-        std::lock_guard<std::mutex> lock(voters_mtx_);
-        spec_voters_.insert(voter_id);
-      }
-    } else {
-      vote_no();
-      if (commo_quorum_should_advance_term(term, q().highest_term_.get()))
-      {
-        q().highest_term_.set(term);
-      }
-    }
-  }
-
-  // Legacy overload for backward compatibility
-  void FeedResponse(bool y, ballot_t term) {
-    FeedResponse(y, term, 0);
-  }
-
-  // @safe
-  int64_t Term() {
-    return q().highest_term_.get();
-  }
-
-  // @unsafe - Get the set of sites that voted yes (memory votes)
-  std::set<siteid_t> GetSpecVoters() {
-    std::lock_guard<std::mutex> lock(voters_mtx_);
-    return spec_voters_;
-  }
-};
-
 // @safe - value-only interpretation of an AppendEntries callback result. The
 // async callback lifetime, shared result object, and RPC fanout stay in
 // RaftCommo; these helpers only classify already-copied scalar reply fields.
@@ -503,14 +430,6 @@ friend class RaftProxy;
   // @safe
   RaftCommo(rusty::Option<rusty::Arc<PollThread>> poll = rusty::None);
 
-  // @unsafe - C-style cast
-  shared_ptr<RaftVoteQuorumEvent>
-  BroadcastVote(parid_t par_id,
-                        slotid_t lst_log_idx,
-                        ballot_t lst_log_term,
-                        siteid_t self_id,
-                        ballot_t cur_term );
-
   /**
    * SendTimeoutNow - Send TimeoutNow RPC to target replica
    *
@@ -641,12 +560,9 @@ friend class RaftProxy;
   // ==========================================================================
   // callback-shaped variants of the quorum RPCs.
   //
-  // The existing SendAppendEntries / BroadcastVote methods return
-  // shared_ptr<QuorumEvent> shapes that fit the fiber-based wait path in
-  // RaftServer. The new *Cb variants deliver each peer's reply via a plain
-  // callback, which is the shape RrrTransportAdapter wires into TransportBase. Both
-  // variants share the same underlying rrr async_* call site; the *Cb
-  // variants are merely a different projection of the reply.
+  // The *Cb variants deliver each peer's reply via a plain callback, which is
+  // the shape RrrTransportAdapter wires into TransportBase. They share the
+  // underlying rrr async_* call sites with the legacy communicator methods.
   // ==========================================================================
 
   // @unsafe - legacy RPC boundary: single-target AppendEntries callback API.

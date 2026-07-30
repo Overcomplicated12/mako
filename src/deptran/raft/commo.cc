@@ -37,68 +37,6 @@ namespace janus
     //  verify(poll != nullptr);
   }
 
-  // @unsafe - Legacy fanout RPC boundary. The quorum event is shared with each
-  // async vote callback and with the caller waiting for quorum.
-  shared_ptr<RaftVoteQuorumEvent>
-  RaftCommo::BroadcastVote(parid_t par_id,
-                           slotid_t lst_log_idx,
-                           ballot_t lst_log_term,
-                           siteid_t self_id,
-                           ballot_t cur_term)
-  {
-    int n = 0;
-    // @unsafe
-    {
-      n = Config::GetConfig()->GetPartitionSize(par_id);
-    }
-    auto e = std::make_shared<RaftVoteQuorumEvent>(n, n / 2);
-    auto proxies = rpc_par_proxies_[par_id];
-    WAN_WAIT;
-    for (auto &p : proxies)
-    {
-      auto site_id = p.first;
-      if (commo_proxy_is_self(site_id, self_id))
-      {
-        continue;
-      }
-      RaftProxy *proxy;
-      // @unsafe
-      {
-        proxy = (RaftProxy *)p.second;
-      }
-      FutureAttr fuattr;
-      // Capture the quorum event by shared_ptr so peer replies can arrive
-      // after BroadcastVote returns.
-      fuattr.callback = [e, site_id](rusty::Arc<Future> fu)
-      {
-        if (commo_future_failed(fu->get_error_code()))
-        {
-          // Don't reconnect here - rely on NotifyRestart mechanism instead
-          Log_debug("[VOTE_RPC] Error response from site {}, error_code={}", site_id, fu->get_error_code());
-          return;
-        }
-        ballot_t term = 0;
-        bool_t vote = false;
-        rrr::deserialize_from(fu->get_reply(), term);
-        rrr::deserialize_from(fu->get_reply(), vote);
-        // SPECULATIVE VOTING: Track which site voted yes
-        e->FeedResponse(vote, term, site_id);
-      };
-      RaftProxy::RpcVoteRequest req{};
-      req.lst_log_idx = lst_log_idx;
-      req.lst_log_term = lst_log_term;
-      req.site_id = self_id;
-      req.cur_term = cur_term;
-      auto f = proxy->async_Vote(req, fuattr);
-      _RPC_COUNT();
-      if (commo_future_result_ok(f.is_ok()))
-      {
-        Future::safe_release(f.unwrap().raw_future());
-      }
-    }
-    return std::move(e);
-  }
-
   // ============================================================================
   // TimeoutNow RPC - Leadership Transfer Protocol
   // ============================================================================

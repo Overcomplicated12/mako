@@ -77,7 +77,6 @@ import std;
 //   janus::View::View: [safe, (...) -> owned]
 //   janus::View::operator=: [safe, (&'a mut, const &'a) -> &'a mut]
 //   janus::TxLogServer::DestroyTx: [safe, (&'a mut, uint64_t) -> void]
-//   janus::RaftCommo::BroadcastVote: [safe, (...) -> owned]
 // }
 
 namespace janus {
@@ -1576,31 +1575,27 @@ void RaftServer::HeartbeatLoop() {
               uint64_t snap_last_idx = snap_meta.last_included_index;
               uint64_t snap_last_term = snap_meta.last_included_term;
               uint64_t send_term = currentTerm;
-              commo()->SendInstallSnapshot(
-                  site_id, partition_id_,
-                  send_term, site_id_,
-                  snap_last_idx, snap_last_term,
-                  snap_data,
-                  [this, site_id, snap_last_idx, send_term](uint64_t follower_term) {
-                    // @unsafe - callback modifies shared state under lock
-                    std::lock_guard<std::recursive_mutex> lock(mtx_);
-                    if (follower_term > currentTerm) {
-                      Log_info("[HEARTBEAT-SNAPSHOT] Site {}: Follower {} has higher term {} > {}, stepping down",
-                               site_id_, site_id, follower_term, currentTerm);
-                      currentTerm = follower_term;
-                      stepDown(StepDownReason::HigherTerm);
-                      return;
-                    }
-                    if (currentTerm != send_term) {
-                      Log_info("[HEARTBEAT-SNAPSHOT] Site {}: Term changed since snapshot send, ignoring response",
-                               site_id_);
-                      return;
-                    }
-                    next_index_[site_id] = snap_last_idx + 1;
-                    match_index_[site_id] = snap_last_idx;
-                    Log_info("[HEARTBEAT-SNAPSHOT] Site {}: Updated follower {}: next_index={} match_index={}",
-                             site_id_, site_id, snap_last_idx + 1, snap_last_idx);
-                  });
+              raft::InstallSnapshotReq request{
+                  send_term, site_id_, snap_last_idx, snap_last_term,
+                  std::move(snap_data)};
+              raft::InstallSnapshotReply reply =
+                  transport()->send_install_snapshot(site_id, std::move(request));
+              // @unsafe - reply processing mutates replication state under lock.
+              std::lock_guard<std::recursive_mutex> lock(mtx_);
+              if (reply.term_out > currentTerm) {
+                Log_info("[HEARTBEAT-SNAPSHOT] Site {}: Follower {} has higher term {} > {}, stepping down",
+                         site_id_, site_id, reply.term_out, currentTerm);
+                currentTerm = reply.term_out;
+                stepDown(StepDownReason::HigherTerm);
+              } else if (currentTerm != send_term) {
+                Log_info("[HEARTBEAT-SNAPSHOT] Site {}: Term changed since snapshot send, ignoring response",
+                         site_id_);
+              } else {
+                next_index_[site_id] = snap_last_idx + 1;
+                match_index_[site_id] = snap_last_idx;
+                Log_info("[HEARTBEAT-SNAPSHOT] Site {}: Updated follower {}: next_index={} match_index={}",
+                         site_id_, site_id, snap_last_idx + 1, snap_last_idx);
+              }
               skip_follower = true;  // Skip normal AppendEntries for this follower
             } else {
               Log_warn("[HEARTBEAT-SNAPSHOT] Site {}: Failed to load snapshot for follower {}, skipping",
@@ -2594,7 +2589,6 @@ void RaftServer::OnAppendEntries(const slotid_t slot_id,
       ballot_t term_copy = currentTerm;
       siteid_t follower_id_copy = site_id_;
       siteid_t leader_id_copy = leaderSiteId;
-      parid_t par_id_copy = partition_id_;
       uint64_t commit_index_copy = commitIndex;
 
       // Release mutex before persistence work.
@@ -2625,7 +2619,7 @@ void RaftServer::OnAppendEntries(const slotid_t slot_id,
             async_threads_.emplace_back(
               std::thread([this, entries = std::move(entries_to_persist),
                          log_index_for_durable_ack, term_copy, follower_id_copy,
-                         leader_id_copy, par_id_copy, commit_index_copy, done]() {
+                         leader_id_copy, commit_index_copy, done]() {
               // Persist all log entries
               for (const auto& entry : entries) {
                 PersistLogEntry(entry.first, *entry.second, "OnAppendEntries: async follower entry");
@@ -2634,12 +2628,11 @@ void RaftServer::OnAppendEntries(const slotid_t slot_id,
               // Also persist commit index (async is fine for commit index)
               PersistCommitIndex(commit_index_copy, "OnAppendEntries: async follower commit");
 
-              // Send AppendEntriesDurable RPC to leader
-              auto c = commo();
-              if (c != nullptr) {
-                c->SendAppendEntriesDurable(leader_id_copy, par_id_copy, term_copy,
-                                            follower_id_copy, log_index_for_durable_ack);
-              }
+              // Send AppendEntriesDurable RPC to leader.
+              transport()->send_append_entries_durable(
+                  leader_id_copy,
+                  raft::AppendEntriesDurableReq{
+                      term_copy, follower_id_copy, log_index_for_durable_ack});
               done->store(true, rusty::sync::atomic::Ordering::Release);
             }), done);
           }

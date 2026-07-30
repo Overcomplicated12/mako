@@ -528,24 +528,33 @@ returns `shared_ptr<SendAppendEntriesResults>`. Callers read `res->done`,
 
 ### 8.1.e — Migrate the remaining outbound sites
 
-- [ ] Line 1530 `SendInstallSnapshot` → `transport_->send_install_snapshot`.
-- [ ] Line 2589 `SendAppendEntriesDurable` → `transport_->send_append_entries_durable`
+- [x] Line 1530 `SendInstallSnapshot` → `transport_->send_install_snapshot`.
+  The synchronous transport reply preserves higher-term and replication-index
+  handling in the heartbeat fiber.
+- [x] Line 2589 `SendAppendEntriesDurable` → `transport_->send_append_entries_durable`
   (fire-and-forget).
-- [ ] `server.h:408` `SendVoteDurable` → `transport_->send_vote_durable`
+- [x] `server.h:408` `SendVoteDurable` → `transport_->send_vote_durable`
   (fire-and-forget).
-- [ ] `TimeoutNow` call sites → `transport_->send_timeout_now`.
+- [x] `TimeoutNow` call sites → `transport_->send_timeout_now`. No direct
+  outbound server call remains; leadership transfer currently uses the
+  trigger flag on `EmptyAppendEntries`, while the facade supports standalone
+  TimeoutNow for future callers.
 - [ ] Line 1194 `UpdatePartitionView` — this is gossip; either drop
   it from the facade or leave the direct `commo()->UpdatePartitionView`
   call (annotate `@unsafe` and note it's out of scope for 8.x).
 - [ ] Line 1408 `commo()->rpc_par_proxies_[par_id]` — this reaches
   into rrr internals. Either wrap with a helper on `RaftCommo` that
   RaftServer consumes, or leave as a documented `@unsafe` boundary.
-- [ ] Delete `RaftVoteQuorumEvent` from `commo.h` + `commo.cc` now
-  that no one calls `BroadcastVote`.
+- [x] Delete `RaftVoteQuorumEvent` and the obsolete `BroadcastVote` path from
+  `commo.h` + `commo.cc` now that election uses per-peer transport sends.
 - [ ] Gate: full lab test + `shard1ReplicationRaft` throughput
   (≥80k ops/sec per docs/dev/raft_decouple_plan.md completion criteria).
 - [ ] **Commit**: `raft: phase 8.1e — retire remaining commo() outbound
   call sites; delete SendAppendEntriesResults + RaftVoteQuorumEvent`.
+
+Validation: Clang 22 `mako` build plus `test_raft_quorum`,
+`test_raft_transport_facade`, and `test_raft_rrr_transport_compile` pass.
+The full lab range and throughput gate remain pending.
 
 ### 8.1 risks
 
