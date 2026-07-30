@@ -160,82 +160,6 @@ class RaftVoteQuorumEvent: public QuorumEventWrapper {
   }
 };
 
-struct SendAppendEntriesResults;
-
-inline SendAppendEntriesResults send_append_entries_results_defaults();
-
-#if RUSTYCPP_RUST
-pub struct SendAppendEntriesResults {
-    done: bool,
-    ok: u64,
-    followerTerm: u64,
-    followerLastLogIndex: u64,
-    followerAckType: u64,
-    empty: bool,
-}
-
-impl SendAppendEntriesResults {
-    fn defaults() -> SendAppendEntriesResults {
-        send_append_entries_results_defaults()
-    }
-
-    // @safe
-    fn apply_reply(&mut self,
-                   ok: u64,
-                   follower_term: u64,
-                   follower_last_log_index: u64,
-                   follower_ack_type: u64,
-                   has_cmd: bool) {
-        self.ok = ok;
-        self.followerTerm = follower_term;
-        self.followerLastLogIndex = follower_last_log_index;
-        self.followerAckType = follower_ack_type;
-        self.empty = !has_cmd;
-        self.done = !(ok == 0 && follower_term == 0 && follower_last_log_index == 0);
-    }
-}
-#endif
-/*RUSTYCPP:GEN-BEGIN id=commo.send_append_entries_results version=1 rust_sha256=6b6bca23f8357319e59dea5bf378dd812d77f4c980f9be24836198af6290a9af*/
-struct SendAppendEntriesResults;
-
-struct SendAppendEntriesResults {
-    bool done;
-    uint64_t ok;
-    uint64_t followerTerm;
-    uint64_t followerLastLogIndex;
-    uint64_t followerAckType;
-    bool empty;
-
-    static SendAppendEntriesResults defaults();
-    void apply_reply(uint64_t ok, uint64_t follower_term, uint64_t follower_last_log_index, uint64_t follower_ack_type, bool has_cmd);
-};
-
-
-inline SendAppendEntriesResults SendAppendEntriesResults::defaults() {
-    return send_append_entries_results_defaults();
-}
-
-inline void SendAppendEntriesResults::apply_reply(uint64_t ok, uint64_t follower_term, uint64_t follower_last_log_index, uint64_t follower_ack_type, bool has_cmd) {
-    this->ok = std::move(ok);
-    this->followerTerm = std::move(follower_term);
-    this->followerLastLogIndex = std::move(follower_last_log_index);
-    this->followerAckType = std::move(follower_ack_type);
-    this->empty = !has_cmd;
-    this->done = !(((rusty::detail::deref_if_pointer_like(ok) == static_cast<uint64_t>(0)) && (rusty::detail::deref_if_pointer_like(follower_term) == static_cast<uint64_t>(0))) && (rusty::detail::deref_if_pointer_like(follower_last_log_index) == static_cast<uint64_t>(0)));
-}
-/*RUSTYCPP:GEN-END id=commo.send_append_entries_results*/
-
-inline SendAppendEntriesResults send_append_entries_results_defaults() {
-  SendAppendEntriesResults results{};
-  results.done = false;
-  results.ok = 0;
-  results.followerTerm = 0;
-  results.followerLastLogIndex = 0;
-  results.followerAckType = 0;
-  results.empty = true;
-  return results;
-}
-
 // @safe - value-only interpretation of an AppendEntries callback result. The
 // async callback lifetime, shared result object, and RPC fanout stay in
 // RaftCommo; these helpers only classify already-copied scalar reply fields.
@@ -426,76 +350,6 @@ inline bool commo_ack_type_is_durable(uint64_t ack_type) {
 }
 /*RUSTYCPP:GEN-END id=commo.ack_type_helpers*/
 
-// Response data for async AppendEntries RPC.
-// Uses shared_ptr semantics to ensure memory validity when callback fires.
-struct AppendEntriesResponse;
-
-inline AppendEntriesResponse append_entries_response_defaults();
-
-#if RUSTYCPP_RUST
-pub struct AppendEntriesResponse {
-    event: shared_ptr<IntEvent>,
-    status: u64,
-    term: u64,
-    last_log_index: u64,
-    ack_type: u64,
-}
-
-impl AppendEntriesResponse {
-    fn defaults() -> AppendEntriesResponse {
-        append_entries_response_defaults()
-    }
-
-    // @safe
-    fn apply_reply(&mut self,
-                   status: u64,
-                   term: u64,
-                   last_log_index: u64,
-                   ack_type: u64) {
-        self.status = status;
-        self.term = term;
-        self.last_log_index = last_log_index;
-        self.ack_type = ack_type;
-    }
-}
-#endif
-/*RUSTYCPP:GEN-BEGIN id=commo.append_entries_response version=1 rust_sha256=de4dfbb8b0268305ca318f5ee94e0258ae18dd8d10205519612e4bf430010684*/
-struct AppendEntriesResponse;
-
-struct AppendEntriesResponse {
-    shared_ptr<IntEvent> event;
-    uint64_t status;
-    uint64_t term;
-    uint64_t last_log_index;
-    uint64_t ack_type;
-
-    static AppendEntriesResponse defaults();
-    void apply_reply(uint64_t status, uint64_t term, uint64_t last_log_index, uint64_t ack_type);
-};
-
-
-inline AppendEntriesResponse AppendEntriesResponse::defaults() {
-    return append_entries_response_defaults();
-}
-
-inline void AppendEntriesResponse::apply_reply(uint64_t status, uint64_t term, uint64_t last_log_index, uint64_t ack_type) {
-    this->status = std::move(status);
-    this->term = std::move(term);
-    this->last_log_index = std::move(last_log_index);
-    this->ack_type = std::move(ack_type);
-}
-/*RUSTYCPP:GEN-END id=commo.append_entries_response*/
-
-inline AppendEntriesResponse append_entries_response_defaults() {
-  AppendEntriesResponse response{};
-  response.event = shared_ptr<IntEvent>();
-  response.status = 0;
-  response.term = 0;
-  response.last_log_index = 0;
-  response.ack_type = 0;
-  return response;
-}
-
 #if RUSTYCPP_RUST
 pub struct RaftCommoIdentityCore {
     self_site_id_: rusty::Cell<u16>,
@@ -649,42 +503,6 @@ friend class RaftProxy;
   // @safe
   RaftCommo(rusty::Option<rusty::Arc<PollThread>> poll = rusty::None);
 
-  // @safe
-  // Returns shared_ptr to response data - callback captures this to ensure memory validity
-  // take janus::Command (was shared_ptr<Marshallable>);
-  // shared_ptr<Marshallable> callers auto-convert via implicit Command ctor.
-  shared_ptr<AppendEntriesResponse>
-  SendAppendEntries2(siteid_t site_id,
-                    parid_t par_id,
-                    slotid_t slot_id,
-                    ballot_t ballot,
-                    bool isLeader,
-                    siteid_t leader_site_id,
-                    uint64_t currentTerm,
-                    uint64_t prevLogIndex,
-                    uint64_t prevLogTerm,
-                    uint64_t commitIndex,
-                    const janus::Command& cmd,
-                    uint64_t cmdLogTerm
-                    );
-
-  // @unsafe - C-style cast, raw pointers
-  // take janus::Command (was shared_ptr<Marshallable>);
-  // shared_ptr<Marshallable> callers auto-convert via implicit Command ctor.
-  shared_ptr<SendAppendEntriesResults>
-  SendAppendEntries(siteid_t site_id,
-                    parid_t par_id,
-                    slotid_t slot_id,
-                    ballot_t ballot,
-                    bool isLeader,
-                    siteid_t leader_site_id,
-                    uint64_t currentTerm,
-                    uint64_t prevLogIndex,
-                    uint64_t prevLogTerm,
-                    uint64_t commitIndex,
-                    const janus::Command& cmd,
-                    uint64_t cmdLogTerm,
-                    bool trigger_election_now = false);
   // @unsafe - C-style cast
   shared_ptr<RaftVoteQuorumEvent>
   BroadcastVote(parid_t par_id,

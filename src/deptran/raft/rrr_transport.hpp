@@ -87,7 +87,7 @@ inline AppendEntriesReply rrr_transport_send_append_entries_cpp(
         *slot = std::move(r);
         ready->set(1);
       });
-  ready->wait();  // yields fiber until reply arrives or timeout
+  ready->wait_timeout(100000);  // preserve the heartbeat's 100 ms RPC bound
   return *slot;
 }
 
@@ -111,7 +111,7 @@ inline EmptyAppendEntriesReply rrr_transport_send_empty_append_entries_cpp(
         *slot = std::move(r);
         ready->set(1);
       });
-  ready->wait();
+  ready->wait_timeout(100000);  // preserve the heartbeat's 100 ms RPC bound
   EmptyAppendEntriesReply out{};
   out.follower_append_ok = slot->follower_append_ok;
   out.follower_current_term = slot->follower_current_term;

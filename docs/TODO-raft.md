@@ -475,7 +475,7 @@ else if (sp_quorum->no()) { ... }
   blocked by the checkout's Clang 22 requirement and stale generated rrr
   headers; rerun tests in a supported build environment before closing this
   gate.
-- [ ] **Commit**: `raft: phase 8.1c — migrate BroadcastVote to
+- [x] **Commit**: `raft: phase 8.1c — migrate BroadcastVote to
   per-peer send_vote via RaftQuorum`.
 
 ### 8.1.d — Migrate `SendAppendEntries` (hot replication path)
@@ -500,25 +500,29 @@ returns `shared_ptr<SendAppendEntriesResults>`. Callers read `res->done`,
 `res->ok`, `res->followerTerm`, `res->followerLastLogIndex`,
 `res->followerAckType` after `res->event->wait()`.
 
-- [ ] Convert to per-peer `transport_->send_append_entries(peer, req)`
+- [x] Convert to per-peer `transport_->send_append_entries(peer, req)`
   returning `AppendEntriesReply` directly. Build an
   `AppendEntriesReq` from the same fields.
-- [ ] In HeartbeatLoop: each peer's replication sub-fiber
+- [x] In HeartbeatLoop: each peer's replication sub-fiber
   (`Fiber::create_run`) calls `send_append_entries` synchronously,
   consumes the reply, updates `next_index_[peer]` / `match_index_[peer]`
   under `mtx_`.
-- [ ] For the speculative path at 1647 (`SendAppendEntries2`): if the
+- [x] For the speculative path at 1647 (`SendAppendEntries2`): if the
   semantics are identical to the standard path (just a different
   result shape), consolidate. Otherwise add a
   `transport_->send_append_entries_spec` variant — but first confirm
   the spec path is actually distinguishable on the wire.
-- [ ] Delete `SendAppendEntriesResults` from `commo.h` +
+- [x] Delete `SendAppendEntriesResults` from `commo.h` +
   `commo.cc` + every include site. Delete `SendAppendEntries2` /
   `SendAppendEntries` member definitions from RaftCommo (the
   `*Cb` variants stay as the rrr-side callback entry).
 - [ ] Gate: lab test tests 1-60 all pass. Watch TEST 3 (Basic
   agreement), TEST 7 (Concurrent starts), TEST 11 (Figure 8),
   TEST 60 (HeartbeatLoop triggers InstallSnapshot).
+- **Validation note**: implementation is complete, but the local build is
+  currently blocked during CMake regeneration by the checkout's Clang 22
+  requirement; run the lab range in a supported build environment before
+  closing this gate.
 - [ ] **Commit**: `raft: phase 8.1d — migrate SendAppendEntries /
   SendAppendEntries2 to per-peer transport_->send_append_entries`.
 
@@ -824,7 +828,7 @@ verification. Listed here so they don't get lost.
 - [x] Phase 8.1a — RaftQuorum primitive [26:04:25, 12:30]
 - [x] Phase 8.1b — TransportProxy member on RaftServer
 - [x] Phase 8.1c — migrate BroadcastVote (implementation; validation pending)
-- [ ] Phase 8.1d — migrate SendAppendEntries / SendAppendEntries2
+- [x] Phase 8.1d — migrate SendAppendEntries / SendAppendEntries2 (implementation; validation pending)
 - [ ] Phase 8.1e — retire remaining commo() outbound sites
 - [ ] Phase 8.2 — RaftServerDispatcher
 - [ ] Phase 8.3 — RaftServiceImpl → DispatcherProxy

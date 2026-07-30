@@ -8,7 +8,8 @@ cmake_minimum_required(VERSION 3.30)
 # into no-ops via the header guard. The UUID gates CMake's
 # experimental `import std;` materialization and must be set BEFORE
 # `project()`.
-set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "451f2fe2-a8a2-47c3-bc32-94786d8fc91b")
+# CMake 3.30 and 3.31 use this gate value for import-std support.
+set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "0e5b6991-d74f-4b3d-a41c-cf096e0b2508")
 
 # Suppress CMake policy warnings for deprecated modules
 # CMP0167: FindBoost module is removed in CMake 3.30+, but we still support older CMake
@@ -113,6 +114,9 @@ endif()
 set(CMAKE_CXX_FLAGS_INIT "-stdlib=libc++")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-stdlib=libc++ ${MAKO_BREW_LIBCXX_FLAGS}")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-stdlib=libc++ ${MAKO_BREW_LIBCXX_FLAGS}")
+# CMake's import-std probe needs the standard library identity before the
+# CXX compiler is enabled; the compiler flag alone is not enough.
+set(CMAKE_CXX_STANDARD_LIBRARY "libc++")
 
 project(mako)
 
