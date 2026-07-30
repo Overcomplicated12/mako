@@ -87,9 +87,66 @@ cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- check \
 ```
 
 For a migration-equivalence check, build separate pre-migration and migrated
-Raft harnesses, set the environment variable independently for each wrapper,
-and pass those two wrapper paths as `--baseline-bin` and `--candidate-bin`.
-The identity smoke check cannot establish equivalence by itself.
+Raft harnesses. Create one small executable wrapper per build that sets
+`RUSTYTWIN_RAFT_QUORUM_TEST` to its own test binary, then invokes
+`raft_quorum_gtest_harness.py`; pass those two wrapper paths as
+`--baseline-bin` and `--candidate-bin`. The identity smoke check cannot
+establish equivalence by itself.
+
+## Module Test Process
+
+Use this process when bringing any Mako module under RustyTwin. Keep the first
+operation tape small and deterministic; grow it only after the basic boundary
+is trustworthy.
+
+1. Build and run the module's normal focused test target first. Use Mako's
+   configured C++23 and Clang 22 toolchain, and fix ordinary test failures
+   before involving RustyTwin.
+2. Choose a narrow behavior boundary: a pure helper, value type, codec, or
+   focused test target. Avoid cluster timing, real network I/O, filesystem
+   persistence, and broad server lifecycle behavior in the first tape.
+3. Define one NDJSON operation for each observable behavior. Give every
+   operation a stable `step`, name, and JSON arguments. A harness should emit
+   exactly one event for each operation, including the return value or a small
+   state summary needed for comparison.
+4. Write a thin executable harness per implementation. It reads NDJSON from
+   standard input, calls the module boundary, and writes NDJSON only to
+   standard output. Send logs and diagnostics to standard error. Keep harness
+   policy out of the module itself.
+5. Start with an identity smoke check when only one build exists. Run the same
+   harness on both sides to validate process launching, input handling,
+   timeout behavior, and event parsing. Record it as a smoke check, not as
+   migration evidence.
+6. For an equivalence check, build the baseline and DSL-migrated versions
+   separately with the same compiler family, build options, and relevant
+   configuration. Use two wrapper executables so each RustyTwin child process
+   selects the correct binary without relying on shared environment state.
+7. Run the differential check and preserve the output directory:
+
+```bash
+cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- check \
+  --baseline-bin /absolute/path/to/baseline-harness \
+  --candidate-bin /absolute/path/to/candidate-harness \
+  --tape /absolute/path/to/module-operations.ndjson \
+  --out /tmp/rustytwin-module-check \
+  --timeout-ms 5000
+```
+
+8. Treat a nonzero exit as a failed comparison. Inspect and share the saved
+   artifact before changing either implementation:
+
+```bash
+cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- replay \
+  /tmp/rustytwin-module-check/rustytwin-failure-0001.json
+```
+
+9. Add regression coverage when the tape exposes a meaningful behavior. Keep
+   fast identity smoke checks near the module adapter, and reserve broader
+   integration scenarios for a later, explicitly deterministic test layer.
+
+Current canonicalization ignores only elapsed-time-style metadata. Harnesses
+should avoid emitting addresses, wall-clock values, random IDs, unordered
+collections, or verbose framework output on standard output.
 
 ## Protocol
 
