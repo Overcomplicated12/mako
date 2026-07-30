@@ -7,7 +7,7 @@ use rustytwin::compare::compare_results;
 use rustytwin::protocol::CheckMetadata;
 use rustytwin::replay::{load_artifact, save_failure};
 use rustytwin::report::{render_artifact, render_comparison};
-use rustytwin::runner::{load_tape, run_harness, RunnerConfig};
+use rustytwin::runner::{load_tape, run_gtest_harness, run_harness, RunnerConfig};
 
 const DEFAULT_TIMEOUT_MS: u64 = 5_000;
 
@@ -27,6 +27,7 @@ fn run(args: Vec<String>) -> Result<u8, String> {
     };
     match command.as_str() {
         "check" => check(tail),
+        "gtest-check" => gtest_check(tail),
         "replay" => replay(tail),
         "help" | "--help" | "-h" => {
             println!("{}", usage());
@@ -50,13 +51,52 @@ fn check(args: &[String]) -> Result<u8, String> {
         .transpose()?
         .unwrap_or(DEFAULT_TIMEOUT_MS);
 
+    run_check(
+        baseline_bin,
+        candidate_bin,
+        tape_path,
+        output_dir,
+        timeout_ms,
+        run_harness,
+    )
+}
+
+fn gtest_check(args: &[String]) -> Result<u8, String> {
+    let baseline_test = required_option(args, "--baseline-test")?;
+    let candidate_test = required_option(args, "--candidate-test")?;
+    let tape_path = required_option(args, "--tape")?;
+    let output_dir = required_option(args, "--out")?;
+    let timeout_ms = timeout_ms(args)?;
+
+    run_check(
+        baseline_test,
+        candidate_test,
+        tape_path,
+        output_dir,
+        timeout_ms,
+        run_gtest_harness,
+    )
+}
+
+fn run_check(
+    baseline_bin: String,
+    candidate_bin: String,
+    tape_path: String,
+    output_dir: String,
+    timeout_ms: u64,
+    runner: fn(
+        &std::path::Path,
+        &[rustytwin::protocol::Operation],
+        RunnerConfig,
+    ) -> Result<rustytwin::protocol::HarnessResult, String>,
+) -> Result<u8, String> {
     let tape_path = PathBuf::from(tape_path);
     let operations = load_tape(&tape_path)?;
     let config = RunnerConfig {
         timeout: Duration::from_millis(timeout_ms),
     };
-    let baseline = run_harness(&PathBuf::from(&baseline_bin), &operations, config)?;
-    let candidate = run_harness(&PathBuf::from(&candidate_bin), &operations, config)?;
+    let baseline = runner(&PathBuf::from(&baseline_bin), &operations, config)?;
+    let candidate = runner(&PathBuf::from(&candidate_bin), &operations, config)?;
     let comparison = compare_results(&baseline, &candidate);
 
     println!("{}", render_comparison(&comparison));
@@ -81,6 +121,17 @@ fn check(args: &[String]) -> Result<u8, String> {
     Ok(1)
 }
 
+fn timeout_ms(args: &[String]) -> Result<u64, String> {
+    optional_option(args, "--timeout-ms")
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|_| "--timeout-ms must be an unsigned integer".to_owned())
+        })
+        .transpose()
+        .map(|value| value.unwrap_or(DEFAULT_TIMEOUT_MS))
+}
+
 fn replay(args: &[String]) -> Result<u8, String> {
     if args.len() != 1 {
         return Err("replay requires exactly one artifact path".to_owned());
@@ -102,7 +153,7 @@ fn optional_option<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
 }
 
 fn usage() -> String {
-    "Usage:\n  rustytwin check --baseline-bin <path> --candidate-bin <path> --tape <path> --out <dir> [--timeout-ms <ms>]\n  rustytwin replay <artifact>".to_owned()
+    "Usage:\n  rustytwin check --baseline-bin <path> --candidate-bin <path> --tape <path> --out <dir> [--timeout-ms <ms>]\n  rustytwin gtest-check --baseline-test <path> --candidate-test <path> --tape <path> --out <dir> [--timeout-ms <ms>]\n  rustytwin replay <artifact>".to_owned()
 }
 
 #[cfg(test)]

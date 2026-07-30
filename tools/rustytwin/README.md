@@ -71,27 +71,25 @@ cmake --build build22-wrapper --target test_raft_quorum -j2
 build22-wrapper/test_raft_quorum --gtest_color=no
 ```
 
-Then point the checked-in NDJSON adapter at that executable. Using the same
-adapter on both sides is an identity smoke check: it verifies RustyTwin's
-process, timeout, output-capture, and comparison paths against the real Raft
-test suite.
+Then use the built-in GoogleTest adapter. Using the same test binary on both
+sides is an identity smoke check: it verifies RustyTwin's process, timeout,
+output-capture, and comparison paths against the real Raft test suite.
+Each tape operation invokes the test binary once; add a string
+`args.gtest_filter` to run a focused GoogleTest filter for that operation.
 
 ```bash
-env RUSTYTWIN_RAFT_QUORUM_TEST="$PWD/build22-wrapper/test_raft_quorum" \
-cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- check \
-  --baseline-bin tools/rustytwin/adapters/raft_quorum_gtest_harness.py \
-  --candidate-bin tools/rustytwin/adapters/raft_quorum_gtest_harness.py \
+cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- gtest-check \
+  --baseline-test "$PWD/build22-wrapper/test_raft_quorum" \
+  --candidate-test "$PWD/build22-wrapper/test_raft_quorum" \
   --tape tools/rustytwin/examples/raft_quorum_smoke.ndjson \
   --out /tmp/rustytwin-raft-quorum \
   --timeout-ms 5000
 ```
 
 For a migration-equivalence check, build separate pre-migration and migrated
-Raft harnesses. Create one small executable wrapper per build that sets
-`RUSTYTWIN_RAFT_QUORUM_TEST` to its own test binary, then invokes
-`raft_quorum_gtest_harness.py`; pass those two wrapper paths as
-`--baseline-bin` and `--candidate-bin`. The identity smoke check cannot
-establish equivalence by itself.
+Raft test targets and pass their paths as `--baseline-test` and
+`--candidate-test`. The identity smoke check cannot establish equivalence by
+itself.
 
 ## Module Test Process
 
@@ -109,18 +107,21 @@ is trustworthy.
    operation a stable `step`, name, and JSON arguments. A harness should emit
    exactly one event for each operation, including the return value or a small
    state summary needed for comparison.
-4. Write a thin executable harness per implementation. It reads NDJSON from
-   standard input, calls the module boundary, and writes NDJSON only to
-   standard output. Send logs and diagnostics to standard error. Keep harness
-   policy out of the module itself.
+4. Use `gtest-check` when a focused GoogleTest binary provides the boundary.
+   For other module boundaries, write a thin executable harness per
+   implementation. It reads NDJSON from standard input, calls the module
+   boundary, and writes NDJSON only to standard output. Send logs and
+   diagnostics to standard error. Keep harness policy out of the module
+   itself.
 5. Start with an identity smoke check when only one build exists. Run the same
    harness on both sides to validate process launching, input handling,
    timeout behavior, and event parsing. Record it as a smoke check, not as
    migration evidence.
 6. For an equivalence check, build the baseline and DSL-migrated versions
    separately with the same compiler family, build options, and relevant
-   configuration. Use two wrapper executables so each RustyTwin child process
-   selects the correct binary without relying on shared environment state.
+   configuration. `gtest-check` accepts both test paths directly; custom
+   harnesses use two wrapper executables so each child process selects the
+   correct binary without relying on shared environment state.
 7. Run the differential check and preserve the output directory:
 
 ```bash
@@ -128,6 +129,17 @@ cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- check \
   --baseline-bin /absolute/path/to/baseline-harness \
   --candidate-bin /absolute/path/to/candidate-harness \
   --tape /absolute/path/to/module-operations.ndjson \
+  --out /tmp/rustytwin-module-check \
+  --timeout-ms 5000
+```
+
+For a focused GoogleTest target, use the shorter built-in form instead:
+
+```bash
+cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- gtest-check \
+  --baseline-test /absolute/path/to/baseline-test \
+  --candidate-test /absolute/path/to/candidate-test \
+  --tape /absolute/path/to/gtest-operations.ndjson \
   --out /tmp/rustytwin-module-check \
   --timeout-ms 5000
 ```

@@ -18,6 +18,16 @@ fn tape() -> PathBuf {
     tool_root().join("examples/simple_tape.ndjson")
 }
 
+fn gtest_fixture(name: &str) -> PathBuf {
+    tool_root()
+        .join("fixtures/gtest")
+        .join(format!("{name}.sh"))
+}
+
+fn gtest_tape() -> PathBuf {
+    tool_root().join("examples/gtest_smoke.ndjson")
+}
+
 fn output_dir(name: &str) -> PathBuf {
     env::temp_dir().join(format!("rustytwin-cli-{name}-{}", std::process::id()))
 }
@@ -37,6 +47,26 @@ fn run_check(profile: &str, timeout_ms: u64, output_dir: &Path) -> Output {
             output_dir.to_str().unwrap(),
             "--timeout-ms",
             &timeout_ms.to_string(),
+        ])
+        .output()
+        .unwrap()
+}
+
+fn run_gtest_check(baseline: &str, candidate: &str, output_dir: &Path) -> Output {
+    let _ = fs::remove_dir_all(output_dir);
+    Command::new(env!("CARGO_BIN_EXE_rustytwin"))
+        .args([
+            "gtest-check",
+            "--baseline-test",
+            gtest_fixture(baseline).to_str().unwrap(),
+            "--candidate-test",
+            gtest_fixture(candidate).to_str().unwrap(),
+            "--tape",
+            gtest_tape().to_str().unwrap(),
+            "--out",
+            output_dir.to_str().unwrap(),
+            "--timeout-ms",
+            "500",
         ])
         .output()
         .unwrap()
@@ -106,5 +136,25 @@ fn candidate_timeout_is_reported_clearly() {
 
     assert_eq!(output.status.code(), Some(1));
     assert!(stdout(&output).contains("only one harness timed out"));
+    let _ = fs::remove_dir_all(output_dir);
+}
+
+#[test]
+fn gtest_check_compares_passing_test_binaries() {
+    let output_dir = output_dir("gtest-passing");
+    let output = run_gtest_check("passing", "passing", &output_dir);
+
+    assert!(output.status.success(), "{}", stdout(&output));
+    assert!(stdout(&output).contains("Behavioral migration check: PASSED"));
+}
+
+#[test]
+fn gtest_check_writes_an_artifact_when_a_test_binary_fails() {
+    let output_dir = output_dir("gtest-failing");
+    let output = run_gtest_check("passing", "failing", &output_dir);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(stdout(&output).contains("harness exit statuses differ"));
+    assert!(output_dir.join("rustytwin-failure-0001.json").exists());
     let _ = fs::remove_dir_all(output_dir);
 }
