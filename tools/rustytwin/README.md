@@ -83,8 +83,13 @@ cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- gtest-check \
   --candidate-test "$PWD/build22-wrapper/test_raft_quorum" \
   --tape tools/rustytwin/examples/raft_quorum_smoke.ndjson \
   --out /tmp/rustytwin-raft-quorum \
-  --timeout-ms 5000
+  --timeout-ms 5000 \
+  --show-output
 ```
+
+`--show-output` prints the captured baseline and candidate diagnostics to the
+console. Omit it for the normal concise result; output remains available in a
+failure replay artifact either way.
 
 For a migration-equivalence check, build separate pre-migration and migrated
 Raft test targets and pass their paths as `--baseline-test` and
@@ -141,7 +146,8 @@ cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- gtest-check \
   --candidate-test /absolute/path/to/candidate-test \
   --tape /absolute/path/to/gtest-operations.ndjson \
   --out /tmp/rustytwin-module-check \
-  --timeout-ms 5000
+  --timeout-ms 5000 \
+  --show-output
 ```
 
 8. Treat a nonzero exit as a failed comparison. Inspect and share the saved

@@ -158,3 +158,28 @@ fn gtest_check_writes_an_artifact_when_a_test_binary_fails() {
     assert!(output_dir.join("rustytwin-failure-0001.json").exists());
     let _ = fs::remove_dir_all(output_dir);
 }
+
+#[test]
+fn gtest_check_can_show_captured_console_output() {
+    let output_dir = output_dir("gtest-show-output");
+    let _ = fs::remove_dir_all(&output_dir);
+    let output = Command::new(env!("CARGO_BIN_EXE_rustytwin"))
+        .args([
+            "gtest-check",
+            "--baseline-test",
+            gtest_fixture("passing").to_str().unwrap(),
+            "--candidate-test",
+            gtest_fixture("passing").to_str().unwrap(),
+            "--tape",
+            gtest_tape().to_str().unwrap(),
+            "--out",
+            output_dir.to_str().unwrap(),
+            "--show-output",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stdout(&output));
+    assert!(stdout(&output).contains("Baseline captured output:"));
+    assert!(stdout(&output).contains("[  PASSED  ] 1 test."));
+}

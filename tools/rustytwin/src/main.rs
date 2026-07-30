@@ -42,14 +42,7 @@ fn check(args: &[String]) -> Result<u8, String> {
     let candidate_bin = required_option(args, "--candidate-bin")?;
     let tape_path = required_option(args, "--tape")?;
     let output_dir = required_option(args, "--out")?;
-    let timeout_ms = optional_option(args, "--timeout-ms")
-        .map(|value| {
-            value
-                .parse::<u64>()
-                .map_err(|_| "--timeout-ms must be an unsigned integer".to_owned())
-        })
-        .transpose()?
-        .unwrap_or(DEFAULT_TIMEOUT_MS);
+    let timeout_ms = timeout_ms(args)?;
 
     run_check(
         baseline_bin,
@@ -57,6 +50,7 @@ fn check(args: &[String]) -> Result<u8, String> {
         tape_path,
         output_dir,
         timeout_ms,
+        has_flag(args, "--show-output"),
         run_harness,
     )
 }
@@ -74,6 +68,7 @@ fn gtest_check(args: &[String]) -> Result<u8, String> {
         tape_path,
         output_dir,
         timeout_ms,
+        has_flag(args, "--show-output"),
         run_gtest_harness,
     )
 }
@@ -84,6 +79,7 @@ fn run_check(
     tape_path: String,
     output_dir: String,
     timeout_ms: u64,
+    show_output: bool,
     runner: fn(
         &std::path::Path,
         &[rustytwin::protocol::Operation],
@@ -97,6 +93,10 @@ fn run_check(
     };
     let baseline = runner(&PathBuf::from(&baseline_bin), &operations, config)?;
     let candidate = runner(&PathBuf::from(&candidate_bin), &operations, config)?;
+    if show_output {
+        print_captured_output("Baseline", &baseline);
+        print_captured_output("Candidate", &candidate);
+    }
     let comparison = compare_results(&baseline, &candidate);
 
     println!("{}", render_comparison(&comparison));
@@ -119,6 +119,29 @@ fn run_check(
     )?;
     println!("\nReplay artifact:\n  {}", artifact_path.display());
     Ok(1)
+}
+
+fn print_captured_output(label: &str, result: &rustytwin::protocol::HarnessResult) {
+    println!("\n{label} captured output:");
+    if result.stdout.is_empty() && result.stderr.is_empty() {
+        println!("  <no output>");
+        return;
+    }
+    if !result.stdout.is_empty() {
+        println!("stdout:");
+        print_output(&result.stdout);
+    }
+    if !result.stderr.is_empty() {
+        println!("stderr:");
+        print_output(&result.stderr);
+    }
+}
+
+fn print_output(output: &str) {
+    print!("{output}");
+    if !output.ends_with('\n') {
+        println!();
+    }
 }
 
 fn timeout_ms(args: &[String]) -> Result<u64, String> {
@@ -152,8 +175,12 @@ fn optional_option<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
         .find_map(|pair| (pair[0] == name).then_some(pair[1].as_str()))
 }
 
+fn has_flag(args: &[String], flag: &str) -> bool {
+    args.iter().any(|argument| argument == flag)
+}
+
 fn usage() -> String {
-    "Usage:\n  rustytwin check --baseline-bin <path> --candidate-bin <path> --tape <path> --out <dir> [--timeout-ms <ms>]\n  rustytwin gtest-check --baseline-test <path> --candidate-test <path> --tape <path> --out <dir> [--timeout-ms <ms>]\n  rustytwin replay <artifact>".to_owned()
+    "Usage:\n  rustytwin check --baseline-bin <path> --candidate-bin <path> --tape <path> --out <dir> [--timeout-ms <ms>] [--show-output]\n  rustytwin gtest-check --baseline-test <path> --candidate-test <path> --tape <path> --out <dir> [--timeout-ms <ms>] [--show-output]\n  rustytwin replay <artifact>".to_owned()
 }
 
 #[cfg(test)]
@@ -173,5 +200,10 @@ mod tests {
     fn rejects_unknown_commands() {
         let error = run(vec!["unknown".to_owned()]).unwrap_err();
         assert!(error.contains("unknown command"));
+    }
+
+    #[test]
+    fn recognizes_show_output_flag() {
+        assert!(has_flag(&["--show-output".to_owned()], "--show-output"));
     }
 }
