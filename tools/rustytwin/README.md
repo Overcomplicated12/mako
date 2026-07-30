@@ -57,6 +57,40 @@ The `state_mismatch`, `crash_mismatch`, and `timeout_mismatch` fixture
 directories exercise the remaining v0 failure paths. Pass a short
 `--timeout-ms` value for the timeout fixture.
 
+## Raft Quorum Smoke Check
+
+RustyTwin can wrap the focused Raft quorum test target as a small integration
+smoke check. This uses real code from `src/deptran/raft/quorum.hpp`, including
+the inline-Rust DSL-backed helper predicates.
+
+First build and run the existing target from a configured Mako Clang 22 build
+directory. Substitute your own build directory when it differs:
+
+```bash
+cmake --build build22-wrapper --target test_raft_quorum -j2
+build22-wrapper/test_raft_quorum --gtest_color=no
+```
+
+Then point the checked-in NDJSON adapter at that executable. Using the same
+adapter on both sides is an identity smoke check: it verifies RustyTwin's
+process, timeout, output-capture, and comparison paths against the real Raft
+test suite.
+
+```bash
+env RUSTYTWIN_RAFT_QUORUM_TEST="$PWD/build22-wrapper/test_raft_quorum" \
+cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- check \
+  --baseline-bin tools/rustytwin/adapters/raft_quorum_gtest_harness.py \
+  --candidate-bin tools/rustytwin/adapters/raft_quorum_gtest_harness.py \
+  --tape tools/rustytwin/examples/raft_quorum_smoke.ndjson \
+  --out /tmp/rustytwin-raft-quorum \
+  --timeout-ms 5000
+```
+
+For a migration-equivalence check, build separate pre-migration and migrated
+Raft harnesses, set the environment variable independently for each wrapper,
+and pass those two wrapper paths as `--baseline-bin` and `--candidate-bin`.
+The identity smoke check cannot establish equivalence by itself.
+
 ## Protocol
 
 RustyTwin writes one operation per line to both harnesses:
