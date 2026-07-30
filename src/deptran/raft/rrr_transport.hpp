@@ -120,23 +120,20 @@ inline EmptyAppendEntriesReply rrr_transport_send_empty_append_entries_cpp(
   return out;
 }
 
-// @unsafe - bridges per-peer send_vote onto BroadcastVoteCb fanout.
-// BroadcastVoteCb uses rusty::Function and may fire once per peer reply;
-// this adapter filters on `from == dst` and wakes this call's IntEvent.
+// @unsafe - bridges synchronous per-peer send_vote onto RaftCommo's async
+// single-target callback API using a shared reply slot + IntEvent.
 inline VoteReply rrr_transport_send_vote_cpp(RaftCommo* commo,
                                              siteid_t dst,
                                              parid_t par,
                                              VoteReq req) {
   auto slot  = std::make_shared<VoteReply>();
   auto ready = Reactor::create_sp_event<IntEvent>();
-  commo->BroadcastVoteCb(
-      par, req.last_log_idx, req.last_log_term,
+  commo->SendVoteCb(
+      dst, par, req.last_log_idx, req.last_log_term,
       req.candidate_site_id, req.current_term,
-      [slot, ready, dst](siteid_t from, VoteReply r) {
-        if (from == dst) {
-          *slot = std::move(r);
-          ready->set(1);
-        }
+      [slot, ready](siteid_t, VoteReply r) {
+        *slot = std::move(r);
+        ready->set(1);
       });
   ready->wait();
   return *slot;

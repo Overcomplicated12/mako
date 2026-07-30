@@ -1007,6 +1007,65 @@ namespace janus
       }
     }
 
+    // @unsafe - legacy RPC boundary: raw RaftProxy cast and async callback.
+    void RaftCommo::SendVoteCb(
+        siteid_t site_id,
+        parid_t par_id,
+        slotid_t lst_log_idx,
+        ballot_t lst_log_term,
+        siteid_t self_id,
+        ballot_t cur_term,
+        rusty::Function<void(siteid_t, raft::VoteReply)> on_reply)
+    {
+      auto proxies = rpc_par_proxies_[par_id];
+      WAN_WAIT;
+      // FutureAttr::callback needs a copyable lambda. Keep the move-only
+      // callback in shared ownership across the legacy async RPC boundary.
+      auto on_reply_ptr = std::make_shared<rusty::Function<void(siteid_t, raft::VoteReply)>>(std::move(on_reply));
+      for (auto &p : proxies)
+      {
+        if (p.first != site_id)
+          continue;
+
+        RaftProxy *proxy;
+        // @unsafe - legacy proxy table stores untyped proxy pointers.
+        {
+          proxy = (RaftProxy *)p.second;
+        }
+        FutureAttr fuattr;
+        fuattr.callback = [on_reply_ptr, site_id](rusty::Arc<Future> fu)
+        {
+          if (commo_future_failed(fu->get_error_code()))
+          {
+            Log_debug("[VOTE_RPC_CB] Error from site {} code={}",
+                      site_id, fu->get_error_code());
+            return;
+          }
+          ballot_t term = 0;
+          bool_t vote = false;
+          rrr::deserialize_from(fu->get_reply(), term);
+          rrr::deserialize_from(fu->get_reply(), vote);
+          raft::VoteReply reply = commo_make_vote_reply(term, vote);
+          if (commo_callback_is_set(static_cast<bool>(*on_reply_ptr)))
+          {
+            (*on_reply_ptr)(site_id, std::move(reply));
+          }
+        };
+        RaftProxy::RpcVoteRequest req{};
+        req.lst_log_idx = lst_log_idx;
+        req.lst_log_term = lst_log_term;
+        req.site_id = self_id;
+        req.cur_term = cur_term;
+        auto f = proxy->async_Vote(req, fuattr);
+        _RPC_COUNT();
+        if (commo_future_result_ok(f.is_ok()))
+        {
+          Future::safe_release(f.unwrap().raw_future());
+        }
+        return;
+      }
+    }
+
     // @unsafe - legacy RPC boundary with fanout: raw RaftProxy casts and async
     // FutureAttr callbacks. The same rusty::Function callback is shared across
     // multiple peer replies through shared_ptr.

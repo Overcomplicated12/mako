@@ -850,6 +850,18 @@ friend class RaftProxy;
       bool trigger_election_now,
       rusty::Function<void(siteid_t, raft::AppendEntriesReply)> on_reply);
 
+  // @unsafe - legacy RPC boundary: single-target Vote callback API.
+  // on_reply fires once for the target site if a reply arrives; on transport
+  // error, it does not fire, so callers should treat absence as timeout.
+  void SendVoteCb(
+      siteid_t site_id,
+      parid_t par_id,
+      slotid_t lst_log_idx,
+      ballot_t lst_log_term,
+      siteid_t self_id,
+      ballot_t cur_term,
+      rusty::Function<void(siteid_t, raft::VoteReply)> on_reply);
+
   // @unsafe - legacy RPC fanout boundary: broadcasts to every peer except self.
   // on_reply is shared across multiple async replies using the implementation's
   // shared_ptr bridge because rusty::Function is move-only.

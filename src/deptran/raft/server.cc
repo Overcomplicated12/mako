@@ -2056,11 +2056,9 @@ bool RaftServer::RequestVote() {
 
   // for(int i = 0; i < 1000; i++) Log_info("not calling the wrong method");
 
-  parid_t par_id = 0;
   parid_t loc_id = 0;
   // @unsafe
   {
-  par_id = this->frame_->site_info_->partition_id_ ;
   loc_id = this->frame_->site_info_->locale_id ;
   }
 
@@ -2103,18 +2101,66 @@ bool RaftServer::RequestVote() {
   Log_info("[RAFT_ELECTION] server {} (loc {}) starting election term {}->{} lastLogIdx={} lastLogTerm={} prev_vote_for={}",
            site_id_, loc_id, prev_term, term, lst_idx, lst_term, prev_vote_for);
 #endif
-  shared_ptr<RaftVoteQuorumEvent> sp_quorum;
-  // @unsafe
+  std::set<siteid_t> voters;
   {
-  sp_quorum = ((RaftCommo *)(this->commo_))->BroadcastVote(par_id,lst_idx,lst_term,loc_id, term );
-  sp_quorum->wait_timeout(1000000);
+    std::lock_guard<std::recursive_mutex> lock(mtx_);
+    voters = current_config();
   }
+  verify(!voters.empty());
+
+  const size_t quorum_size = raft::raft_quorum_majority_count(voters.size());
+  const int peer_count = static_cast<int>(voters.size() - 1);
+  const int replies_needed = static_cast<int>(quorum_size - 1);
+  auto vote_quorum = rusty::Arc<raft::RaftQuorum<raft::VoteReply>>::make(
+      peer_count, replies_needed);
+  const raft::VoteReq request{lst_idx, lst_term, loc_id, term};
+
+  for (siteid_t peer : voters) {
+    if (peer == site_id_) {
+      continue;
+    }
+    Fiber::create_run([this, vote_quorum, peer, request]() mutable {
+      raft::VoteReply reply = transport().send_vote(peer, request);
+      vote_quorum->on_reply(peer, std::move(reply));
+    });
+  }
+
+  const bool reply_quorum = peer_count == 0 ||
+      vote_quorum->wait_until_quorum(1000000);
+  auto replies = vote_quorum->collect();
+  size_t yes_votes = 1;  // The candidate persisted its self-vote before fan-out.
+  size_t no_votes = 0;
+  ballot_t highest_term = term;
+  std::set<siteid_t> spec_voters;
+  for (auto& [peer, reply] : replies) {
+    if (reply.vote_granted) {
+      ++yes_votes;
+      spec_voters.insert(peer);
+    } else {
+      ++no_votes;
+    }
+    highest_term = std::max(highest_term, static_cast<ballot_t>(reply.max_ballot));
+  }
+
   std::lock_guard<std::recursive_mutex> lock1(mtx_);
 #ifdef RAFT_LEADER_ELECTION_DEBUG
-  Log_info("[RAFT_ELECTION] server {} term {} vote outcome yes={} no={} highest_term_seen={} timeout={}",
-           site_id_, term, sp_quorum->q().n_voted_yes_.get(), sp_quorum->q().n_voted_no_.get(), sp_quorum->Term(), sp_quorum->q().timeouted_.get());
+  Log_info("[RAFT_ELECTION] server {} term {} vote outcome yes={} no={} highest_term_seen={} reply_quorum={}",
+           site_id_, term, yes_votes, no_votes, highest_term, reply_quorum);
 #endif
-  if (sp_quorum->yes()) {
+  if (highest_term > currentTerm) {
+    auto prev_local_term = currentTerm;
+    currentTerm = highest_term;
+    vote_core_.set_vote_for(INVALID_SITEID);
+    PersistState(currentTerm, vote_core_.vote_for(),
+                 "RequestVote: observed higher term");
+    LogTermChange("observed higher term from RequestVote replies",
+                  prev_local_term, currentTerm);
+    setIsLeader(false);
+    vote_core_.set_req_voting(false);
+    return false;
+  }
+
+  if (yes_votes >= quorum_size) {
     verify(currentTerm >= term);
     if (term != currentTerm) {
 #ifdef RAFT_LEADER_ELECTION_DEBUG
@@ -2127,7 +2173,7 @@ bool RaftServer::RequestVote() {
     // SPECULATIVE VOTING: Initialize specVoters from vote responses
     // =========================================================================
     // These are memory votes - not yet durable
-    specVoters_ = sp_quorum->GetSpecVoters();
+    specVoters_ = std::move(spec_voters);
     specVoters_.insert(site_id_);  // Add self vote
 
     // Self vote is always durable (we persisted before broadcasting)
@@ -2159,7 +2205,7 @@ bool RaftServer::RequestVote() {
 
 #ifdef RAFT_LEADER_ELECTION_DEBUG
     Log_info("[RAFT_ELECTION] server {} won election term {} (votes yes={} no={})",
-             site_id_, term, sp_quorum->q().n_voted_yes_.get(), sp_quorum->q().n_voted_no_.get());
+             site_id_, term, yes_votes, no_votes);
 #endif
 
     this->rep_frame_ = this->frame_ ;
@@ -2187,33 +2233,21 @@ bool RaftServer::RequestVote() {
       setIsLeader(false) ;
     	return false;
 		}
-  } else if (sp_quorum->no()) {
+  } else if (no_votes > voters.size() - quorum_size) {
     // become a follower
     Log_debug("site {} requestvote rejected", site_id_);
     setIsLeader(false) ;
 #ifdef RAFT_LEADER_ELECTION_DEBUG
     Log_info("[RAFT_ELECTION] server {} lost election term {} (yes={} no={}) highest_term={}",
-             site_id_, term, sp_quorum->q().n_voted_yes_.get(), sp_quorum->q().n_voted_no_.get(), sp_quorum->Term());
+             site_id_, term, yes_votes, no_votes, highest_term);
 #endif
-    //reset cur term if new term is higher
-    ballot_t new_term = sp_quorum->Term() ;
-    if (new_term > currentTerm) {
-      auto prev_local_term = currentTerm;
-      currentTerm = new_term;
-      vote_core_.set_vote_for(INVALID_SITEID);  // Reset vote when advancing to new term
-
-      // CRITICAL: Persist term after observing higher term from election responses
-      PersistState(currentTerm, vote_core_.vote_for(), "RequestVote: observed higher term");
-
-      LogTermChange("observed higher term from RequestVote replies", prev_local_term, currentTerm);
-    }
     vote_core_.set_req_voting(false);
 		return false;
   } else {
     Log_debug("vote timeout {}", loc_id);
 #ifdef RAFT_LEADER_ELECTION_DEBUG
     Log_info("[RAFT_ELECTION] server {} election timed out term {} (yes={} no={})",
-             site_id_, term, sp_quorum->q().n_voted_yes_.get(), sp_quorum->q().n_voted_no_.get());
+             site_id_, term, yes_votes, no_votes);
 #endif
     vote_core_.set_req_voting(false);
 		return false;

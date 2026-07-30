@@ -126,7 +126,7 @@ class RaftQuorum {
   RaftQuorum& operator=(RaftQuorum&&) = delete;
 
   // @safe - record one peer's reply, possibly waking the orchestrator.
-  void on_reply(siteid_t from, Reply reply) {
+  void on_reply(siteid_t from, Reply reply) const {
     {
       auto guard = replies_.lock().unwrap();
       // @unsafe { std::vector::emplace_back is not borrow-checked }
@@ -145,7 +145,7 @@ class RaftQuorum {
 
   // @safe - block the calling fiber up to timeout_us; returns whether the
   // quorum threshold was reached.
-  bool wait_until_quorum(uint64_t timeout_us) {
+  bool wait_until_quorum(uint64_t timeout_us) const {
     // @unsafe { rrr::IntEvent::wait yields the fiber via the reactor;
     //           rrr-boundary call }
     ready_->wait_timeout(timeout_us);
@@ -154,7 +154,7 @@ class RaftQuorum {
   }
 
   // @safe - drain the accumulated (siteid, reply) pairs.
-  std::vector<std::pair<siteid_t, Reply>> collect() {
+  std::vector<std::pair<siteid_t, Reply>> collect() const {
     auto guard = replies_.lock().unwrap();
     std::vector<std::pair<siteid_t, Reply>> out;
     // @unsafe { std::vector::swap is not borrow-checked }
@@ -177,7 +177,7 @@ class RaftQuorum {
   const int n_needed_;
   // See class-level @unsafe note about std::shared_ptr.
   std::shared_ptr<::rrr::IntEvent> ready_;
-  rusty::sync::atomic::AtomicI32 n_received_{0};
+  mutable rusty::sync::atomic::AtomicI32 n_received_{0};
   mutable rusty::Mutex<std::vector<std::pair<siteid_t, Reply>>> replies_;
 };
 

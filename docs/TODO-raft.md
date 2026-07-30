@@ -451,7 +451,7 @@ if (sp_quorum->yes()) { ... specVoters_ = sp_quorum->GetSpecVoters(); ... }
 else if (sp_quorum->no()) { ... }
 ```
 
-- [ ] Replace with:
+- [x] Replace with:
   - Build a `RaftQuorum<VoteReply>` with `n_total` = peers-1,
     `n_needed` = majority count (quorum size – 1 for self-vote).
   - For each peer in the partition (skip self), spawn
@@ -471,6 +471,10 @@ else if (sp_quorum->no()) { ... }
   nothing calls them on the election path.
 - [ ] Gate: lab test tests 1-11 still pass (these exercise initial
   election + re-election). Watch TEST 1 + TEST 2 carefully.
+- **Validation note**: implementation is complete, but the local build gate is
+  blocked by the checkout's Clang 22 requirement and stale generated rrr
+  headers; rerun tests in a supported build environment before closing this
+  gate.
 - [ ] **Commit**: `raft: phase 8.1c — migrate BroadcastVote to
   per-peer send_vote via RaftQuorum`.
 
@@ -818,8 +822,8 @@ verification. Listed here so they don't get lost.
 
 - [x] Phase 8.0 — fiber-sync facades (cf5db3fef)
 - [x] Phase 8.1a — RaftQuorum primitive [26:04:25, 12:30]
-- [ ] Phase 8.1b — TransportProxy member on RaftServer
-- [ ] Phase 8.1c — migrate BroadcastVote
+- [x] Phase 8.1b — TransportProxy member on RaftServer
+- [x] Phase 8.1c — migrate BroadcastVote (implementation; validation pending)
 - [ ] Phase 8.1d — migrate SendAppendEntries / SendAppendEntries2
 - [ ] Phase 8.1e — retire remaining commo() outbound sites
 - [ ] Phase 8.2 — RaftServerDispatcher
