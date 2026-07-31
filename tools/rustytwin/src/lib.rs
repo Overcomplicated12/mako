@@ -2,6 +2,7 @@
 //! a RustyCpp-migrated candidate harness.
 
 pub mod compare;
+pub mod module;
 pub mod protocol;
 pub mod replay;
 pub mod report;

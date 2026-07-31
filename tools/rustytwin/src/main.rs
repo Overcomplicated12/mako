@@ -1,9 +1,10 @@
 use std::env;
 use std::path::PathBuf;
-use std::process::ExitCode;
+use std::process::{Command, ExitCode};
 use std::time::Duration;
 
 use rustytwin::compare::compare_results;
+use rustytwin::module::{BuildRole, ModuleManifest};
 use rustytwin::protocol::CheckMetadata;
 use rustytwin::replay::{load_artifact, save_failure};
 use rustytwin::report::{render_artifact, render_comparison};
@@ -28,6 +29,8 @@ fn run(args: Vec<String>) -> Result<u8, String> {
     match command.as_str() {
         "check" => check(tail),
         "gtest-check" => gtest_check(tail),
+        "init" => init(tail),
+        "doctor" => doctor(tail),
         "replay" => replay(tail),
         "help" | "--help" | "-h" => {
             println!("{}", usage());
@@ -38,6 +41,9 @@ fn run(args: Vec<String>) -> Result<u8, String> {
 }
 
 fn check(args: &[String]) -> Result<u8, String> {
+    if module_path(args).is_some() {
+        return module_check(args);
+    }
     let baseline_bin = required_option(args, "--baseline-bin")?;
     let candidate_bin = required_option(args, "--candidate-bin")?;
     let tape_path = required_option(args, "--tape")?;
@@ -54,6 +60,44 @@ fn check(args: &[String]) -> Result<u8, String> {
         has_flag(args, "--show-output"),
         operations,
         run_harness,
+    )
+}
+
+fn module_check(args: &[String]) -> Result<u8, String> {
+    let manifest_path = module_path(args).expect("module path checked by caller");
+    let manifest_path = PathBuf::from(manifest_path);
+    let manifest = ModuleManifest::load(&manifest_path)?;
+    let baseline_build = resolve_build_dir(
+        &manifest,
+        BuildRole::Baseline,
+        optional_option(args, "--baseline-build").map(PathBuf::from),
+    )?;
+    let candidate_build = resolve_build_dir(
+        &manifest,
+        BuildRole::Candidate,
+        optional_option(args, "--candidate-build").map(PathBuf::from),
+    )?;
+    let baseline_test = manifest.test_path(&baseline_build);
+    let candidate_test = manifest.test_path(&candidate_build);
+    validate_test_binary("baseline", &baseline_test)?;
+    validate_test_binary("candidate", &candidate_test)?;
+
+    let filter = optional_option(args, "--filter")
+        .map(ToOwned::to_owned)
+        .or(manifest.module.filter.clone());
+    let (tape_path, operations) = generated_gtest_operations(filter.as_deref())?;
+    let timeout_ms = timeout_ms_with_default(args, manifest.module.timeout_ms)?;
+    let output_dir = required_option(args, "--out")?;
+
+    run_check(
+        baseline_test.display().to_string(),
+        candidate_test.display().to_string(),
+        tape_path,
+        output_dir,
+        timeout_ms,
+        has_flag(args, "--show-output"),
+        operations,
+        run_gtest_harness,
     )
 }
 
@@ -74,6 +118,92 @@ fn gtest_check(args: &[String]) -> Result<u8, String> {
         operations,
         run_gtest_harness,
     )
+}
+
+fn init(args: &[String]) -> Result<u8, String> {
+    let manifest_path = required_option(args, "--module")?;
+    let test_target = required_option(args, "--test-target")?;
+    let baseline_build = optional_option(args, "--baseline-build").map(PathBuf::from);
+    let candidate_build = optional_option(args, "--candidate-build").map(PathBuf::from);
+    let filter = optional_option(args, "--filter").map(ToOwned::to_owned);
+    let timeout_ms = optional_timeout_ms(args)?;
+
+    ModuleManifest::create(
+        &PathBuf::from(&manifest_path),
+        test_target,
+        baseline_build,
+        candidate_build,
+        filter,
+        timeout_ms,
+    )?;
+    println!("Created module manifest:\n  {manifest_path}");
+    Ok(0)
+}
+
+fn doctor(args: &[String]) -> Result<u8, String> {
+    let manifest_path = required_option(args, "--module")?;
+    let manifest_path = PathBuf::from(manifest_path);
+    let manifest = ModuleManifest::load(&manifest_path)?;
+    let baseline_build = resolve_build_dir(
+        &manifest,
+        BuildRole::Baseline,
+        optional_option(args, "--baseline-build").map(PathBuf::from),
+    )?;
+    let candidate_build = resolve_build_dir(
+        &manifest,
+        BuildRole::Candidate,
+        optional_option(args, "--candidate-build").map(PathBuf::from),
+    )?;
+
+    let mut errors = Vec::new();
+    let mut warnings = Vec::new();
+    let mut checks = vec![format!("module manifest: {}", manifest_path.display())];
+    match tool_version("clang++-22", "--version") {
+        Ok(version) => checks.push(format!("clang++-22: {version}")),
+        Err(error) => errors.push(error),
+    }
+    match tool_version("cmake", "--version") {
+        Ok(version) => checks.push(format!("cmake: {version}")),
+        Err(error) => errors.push(error),
+    }
+
+    check_build_dir(
+        "baseline",
+        &baseline_build,
+        &manifest.module.test_target,
+        &mut checks,
+        &mut errors,
+    );
+    check_build_dir(
+        "candidate",
+        &candidate_build,
+        &manifest.module.test_target,
+        &mut checks,
+        &mut errors,
+    );
+    if canonical_paths_match(&baseline_build, &candidate_build) {
+        warnings.push(
+            "baseline and candidate resolve to the same build directory; this is an identity smoke check, not migration evidence"
+                .to_owned(),
+        );
+    }
+
+    for check in checks {
+        println!("ok: {check}");
+    }
+    for warning in warnings {
+        println!("warning: {warning}");
+    }
+    if errors.is_empty() {
+        println!("RustyTwin doctor: PASSED");
+        Ok(0)
+    } else {
+        for error in errors {
+            println!("error: {error}");
+        }
+        println!("RustyTwin doctor: FAILED");
+        Ok(1)
+    }
 }
 
 fn run_check(
@@ -134,8 +264,16 @@ fn gtest_operations(
             Err("gtest-check accepts either --tape or --filter, not both".to_owned())
         }
         (Some(tape), None) => Ok((tape.to_owned(), load_tape(&PathBuf::from(tape))?)),
-        (None, Some(filter)) if filter.is_empty() => Err("--filter must not be empty".to_owned()),
-        (None, Some(filter)) => Ok((
+        (None, filter) => generated_gtest_operations(filter),
+    }
+}
+
+fn generated_gtest_operations(
+    filter: Option<&str>,
+) -> Result<(String, Vec<rustytwin::protocol::Operation>), String> {
+    match filter {
+        Some(filter) if filter.trim().is_empty() => Err("--filter must not be empty".to_owned()),
+        Some(filter) => Ok((
             format!("<generated GoogleTest filter: {filter}>"),
             vec![rustytwin::protocol::Operation {
                 kind: "operation".to_owned(),
@@ -144,7 +282,7 @@ fn gtest_operations(
                 args: serde_json::json!({"gtest_filter": filter}),
             }],
         )),
-        (None, None) => Ok((
+        None => Ok((
             "<generated full GoogleTest suite>".to_owned(),
             vec![rustytwin::protocol::Operation {
                 kind: "operation".to_owned(),
@@ -180,6 +318,14 @@ fn print_output(output: &str) {
 }
 
 fn timeout_ms(args: &[String]) -> Result<u64, String> {
+    timeout_ms_with_default(args, None)
+}
+
+fn timeout_ms_with_default(args: &[String], manifest_default: Option<u64>) -> Result<u64, String> {
+    optional_timeout_ms(args).map(|value| value.or(manifest_default).unwrap_or(DEFAULT_TIMEOUT_MS))
+}
+
+fn optional_timeout_ms(args: &[String]) -> Result<Option<u64>, String> {
     optional_option(args, "--timeout-ms")
         .map(|value| {
             value
@@ -187,7 +333,81 @@ fn timeout_ms(args: &[String]) -> Result<u64, String> {
                 .map_err(|_| "--timeout-ms must be an unsigned integer".to_owned())
         })
         .transpose()
-        .map(|value| value.unwrap_or(DEFAULT_TIMEOUT_MS))
+}
+
+fn module_path(args: &[String]) -> Option<&str> {
+    optional_option(args, "--module").or_else(|| {
+        args.first()
+            .filter(|value| !value.starts_with('-'))
+            .map(String::as_str)
+    })
+}
+
+fn resolve_build_dir(
+    manifest: &ModuleManifest,
+    role: BuildRole,
+    override_dir: Option<PathBuf>,
+) -> Result<PathBuf, String> {
+    manifest.build_dir(role, override_dir)
+}
+
+fn validate_test_binary(role: &str, path: &std::path::Path) -> Result<(), String> {
+    if path.is_file() {
+        Ok(())
+    } else {
+        Err(format!(
+            "{role} test target is missing: {} (build the target first)",
+            path.display()
+        ))
+    }
+}
+
+fn tool_version(program: &str, argument: &str) -> Result<String, String> {
+    let output = Command::new(program)
+        .arg(argument)
+        .output()
+        .map_err(|error| format!("could not run {program}: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("{program} {argument} exited unsuccessfully"));
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| format!("{program} {argument} produced no output"))
+}
+
+fn check_build_dir(
+    role: &str,
+    build_dir: &std::path::Path,
+    test_target: &str,
+    checks: &mut Vec<String>,
+    errors: &mut Vec<String>,
+) {
+    if !build_dir.is_dir() {
+        errors.push(format!(
+            "{role} build directory does not exist: {}",
+            build_dir.display()
+        ));
+        return;
+    }
+    checks.push(format!("{role} build directory: {}", build_dir.display()));
+    let test_path = build_dir.join(test_target);
+    if test_path.is_file() {
+        checks.push(format!("{role} test target: {}", test_path.display()));
+    } else {
+        errors.push(format!(
+            "{role} test target is missing: {} (build {test_target} first)",
+            test_path.display()
+        ));
+    }
+}
+
+fn canonical_paths_match(left: &std::path::Path, right: &std::path::Path) -> bool {
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => left == right,
+    }
 }
 
 fn replay(args: &[String]) -> Result<u8, String> {
@@ -215,7 +435,7 @@ fn has_flag(args: &[String], flag: &str) -> bool {
 }
 
 fn usage() -> String {
-    "Usage:\n  rustytwin check --baseline-bin <path> --candidate-bin <path> --tape <path> --out <dir> [--timeout-ms <ms>] [--show-output]\n  rustytwin gtest-check --baseline-test <path> --candidate-test <path> --out <dir> [--filter <gtest-filter> | --tape <path>] [--timeout-ms <ms>] [--show-output]\n  rustytwin replay <artifact>".to_owned()
+    "Usage:\n  rustytwin init --module <path> --test-target <target> [--baseline-build <dir>] [--candidate-build <dir>] [--filter <gtest-filter>] [--timeout-ms <ms>]\n  rustytwin doctor --module <path> [--baseline-build <dir>] [--candidate-build <dir>]\n  rustytwin check --module <path> --out <dir> [--baseline-build <dir>] [--candidate-build <dir>] [--filter <gtest-filter>] [--timeout-ms <ms>] [--show-output]\n  rustytwin check <module-path> --out <dir> [module check options]\n  rustytwin check --baseline-bin <path> --candidate-bin <path> --tape <path> --out <dir> [--timeout-ms <ms>] [--show-output]\n  rustytwin gtest-check --baseline-test <path> --candidate-test <path> --out <dir> [--filter <gtest-filter> | --tape <path>] [--timeout-ms <ms>] [--show-output]\n  rustytwin replay <artifact>".to_owned()
 }
 
 #[cfg(test)]
@@ -262,5 +482,16 @@ mod tests {
         ];
 
         assert!(gtest_operations(&args).unwrap_err().contains("not both"));
+    }
+
+    #[test]
+    fn positional_module_path_is_recognized() {
+        let args = vec!["raft-quorum.toml".to_owned()];
+        assert_eq!(module_path(&args), Some("raft-quorum.toml"));
+    }
+
+    #[test]
+    fn module_timeout_uses_the_manifest_default() {
+        assert_eq!(timeout_ms_with_default(&[], Some(123)).unwrap(), 123);
     }
 }

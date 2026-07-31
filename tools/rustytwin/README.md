@@ -18,6 +18,67 @@ RustyTwin does not compile C++ in v0. Future Mako adapters must be built using
 Mako's configured C++23 and Clang 22.x CMake toolchain; this tool must not
 invent a separate compiler configuration.
 
+## Fast Module Workflow
+
+For a focused GoogleTest-backed migration, create a small module manifest once
+and then point RustyTwin at build directories instead of individual binaries.
+The manifest records the target name and default filter; it can hold build
+directories too, although command-line directories take precedence.
+
+```bash
+cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- init \
+  --module tools/rustytwin/modules/raft-quorum.toml \
+  --test-target test_raft_quorum \
+  --baseline-build "$PWD/build22-baseline" \
+  --candidate-build /tmp/mako-raft-sabotage/build22-candidate \
+  --filter RaftQuorumTest.HelperPredicates \
+  --timeout-ms 5000
+```
+
+Run `doctor` before a comparison. It checks that Clang 22 and CMake are
+available, validates the manifest, finds both test targets, and warns when
+both sides resolve to the same build directory.
+
+```bash
+cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- doctor \
+  --module tools/rustytwin/modules/raft-quorum.toml
+```
+
+Then run the comparison with the short module form:
+
+```bash
+cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- check \
+  --module tools/rustytwin/modules/raft-quorum.toml \
+  --out /tmp/rustytwin-raft-quorum \
+  --show-output
+```
+
+You can override either configured build directory without editing TOML:
+
+```bash
+cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- check \
+  tools/rustytwin/modules/raft-quorum.toml \
+  --baseline-build "$PWD/build22-baseline" \
+  --candidate-build /tmp/mako-raft-sabotage/build22-candidate \
+  --out /tmp/rustytwin-raft-quorum
+```
+
+`init` writes this ordinary TOML file:
+
+```toml
+[module]
+adapter = "gtest"
+test_target = "test_raft_quorum"
+filter = "RaftQuorumTest.HelperPredicates"
+timeout_ms = 5000
+
+[baseline]
+build_dir = "/absolute/path/to/build22-baseline"
+
+[candidate]
+build_dir = "/absolute/path/to/build22-candidate"
+```
+
 ## Build And Test
 
 From the repository root:

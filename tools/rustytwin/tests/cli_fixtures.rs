@@ -76,6 +76,18 @@ fn stdout(output: &Output) -> String {
     String::from_utf8_lossy(&output.stdout).to_string()
 }
 
+#[cfg(unix)]
+fn install_gtest_fixture(build_dir: &Path, fixture_name: &str, target: &str) {
+    use std::os::unix::fs::PermissionsExt;
+
+    fs::create_dir_all(build_dir).unwrap();
+    let target_path = build_dir.join(target);
+    fs::copy(gtest_fixture(fixture_name), &target_path).unwrap();
+    let mut permissions = fs::metadata(&target_path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(target_path, permissions).unwrap();
+}
+
 #[test]
 fn equivalent_fixture_passes_despite_elapsed_metadata() {
     let output_dir = output_dir("equivalent");
@@ -205,4 +217,57 @@ fn gtest_check_can_show_captured_console_output() {
     assert!(output.status.success(), "{}", stdout(&output));
     assert!(stdout(&output).contains("Baseline captured output:"));
     assert!(stdout(&output).contains("[  PASSED  ] 1 test."));
+}
+
+#[cfg(unix)]
+#[test]
+fn module_manifest_discovers_gtest_targets_and_doctor_validates_them() {
+    let root = output_dir("module-manifest");
+    let baseline_build = root.join("baseline");
+    let candidate_build = root.join("candidate");
+    let manifest = root.join("raft-quorum.toml");
+    let comparison_output = root.join("out");
+    let _ = fs::remove_dir_all(&root);
+    install_gtest_fixture(&baseline_build, "passing", "test_raft_quorum");
+    install_gtest_fixture(&candidate_build, "passing", "test_raft_quorum");
+
+    let init = Command::new(env!("CARGO_BIN_EXE_rustytwin"))
+        .args([
+            "init",
+            "--module",
+            manifest.to_str().unwrap(),
+            "--test-target",
+            "test_raft_quorum",
+            "--baseline-build",
+            baseline_build.to_str().unwrap(),
+            "--candidate-build",
+            candidate_build.to_str().unwrap(),
+            "--filter",
+            "SampleSuite.Passes",
+        ])
+        .output()
+        .unwrap();
+    assert!(init.status.success(), "{}", stdout(&init));
+    assert!(manifest.exists());
+
+    let doctor = Command::new(env!("CARGO_BIN_EXE_rustytwin"))
+        .args(["doctor", "--module", manifest.to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert!(doctor.status.success(), "{}", stdout(&doctor));
+    assert!(stdout(&doctor).contains("RustyTwin doctor: PASSED"));
+
+    let check = Command::new(env!("CARGO_BIN_EXE_rustytwin"))
+        .args([
+            "check",
+            "--module",
+            manifest.to_str().unwrap(),
+            "--out",
+            comparison_output.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(check.status.success(), "{}", stdout(&check));
+    assert!(stdout(&check).contains("Behavioral migration check: PASSED"));
+    let _ = fs::remove_dir_all(root);
 }
