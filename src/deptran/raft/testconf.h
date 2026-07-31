@@ -28,7 +28,7 @@ namespace janus {
 #define Print(format, ...) fprintf(stderr, format "\n", ##__VA_ARGS__)
 
 extern int _test_id_g;
-#define Init(test_id, description) \
+#define RaftTestInit(test_id, description) \
   Print("TEST %d: " description, test_id); \
   _test_id_g = test_id
 #define Failed(msg, ...) Print("TEST %d Failed: " msg, _test_id_g, ##__VA_ARGS__)
