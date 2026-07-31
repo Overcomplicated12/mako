@@ -55,6 +55,33 @@ comparison. A failed build stops the command and prints the relevant CMake
 diagnostics. When both sides use the same build directory, RustyTwin builds it
 once and reports an identity smoke check.
 
+## How It Works
+
+RustyTwin is a process-level differential checker:
+
+1. A module manifest identifies the adapter, CMake target, optional GoogleTest
+   filter, timeout, and baseline/candidate build directories.
+2. `check --build` asks CMake to build that target on each side. Without
+   `--build`, RustyTwin uses the already-built executables.
+3. The adapter launches each executable separately with the same operation.
+   For `gtest`, that operation is a `--gtest_filter`; for a custom harness it
+   is an NDJSON operation tape on standard input.
+4. RustyTwin captures standard output, standard error, exit status, timeout,
+   and structured events. It compares the two observable results in order.
+5. A match exits `0`. A mismatch exits `1` and writes a JSON replay artifact
+   containing both captures, operations, metadata, and the first divergence.
+
+The code is intentionally split by responsibility:
+
+| Component | Responsibility |
+| --- | --- |
+| `src/main.rs` | CLI parsing and command orchestration. |
+| `src/module.rs` | TOML manifest loading, validation, and target discovery. |
+| `src/runner.rs` | Child-process execution, timeouts, output capture, and gtest adaptation. |
+| `src/protocol.rs` | Typed operation, event, and harness-result data. |
+| `src/compare.rs` | Canonicalization and first-divergence comparison. |
+| `src/replay.rs` and `src/report.rs` | Failure artifact persistence and terminal reports. |
+
 ## Everyday Commands
 
 | Command | Use |
