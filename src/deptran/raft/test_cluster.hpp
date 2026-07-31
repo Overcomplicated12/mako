@@ -16,6 +16,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <memory>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -117,6 +118,10 @@ class TestCluster {
     for (auto& t : worker_threads_) {
       if (t.joinable()) t.join();
     }
+    // Dispatchers borrow their RaftServer from RaftNode.  Dispose workers
+    // first so no dispatcher survives the server it targets.
+    workers_.clear();
+    nodes_.clear();
   }
 
  private:
@@ -138,12 +143,18 @@ class TestCluster {
       auto id = site_ids_[i];
       // @unsafe { direct `new` because Mutex-containing types are not
       //           copy-constructible, so Box::make() does not apply }
-      logs_.emplace_back(new InMemoryLogStorage());
-      snaps_.emplace_back(new MemorySnapshotManager());
+      logs_.emplace_back(std::make_shared<InMemoryLogStorage>());
+      snaps_.emplace_back(std::make_shared<MemorySnapshotManager>());
 
       TransportProxy tr = make_channel_transport(&sw_, id, /*par=*/0);
+      auto server = std::make_unique<RaftServer>(nullptr);
+      server->InitializeForInMemoryTest(
+          id, static_cast<locid_t>(id), /*partition=*/0, site_ids_,
+          make_channel_transport(&sw_, id, /*par=*/0), logs_.back(),
+          snaps_.back());
       rusty::Box<RaftNode> node(new RaftNode(
-          id, std::move(tr), logs_.back().get(), snaps_.back().get()));
+          id, std::move(tr), logs_.back().get(), snaps_.back().get(),
+          std::move(server)));
 
       rusty::Box<ChannelNodeWorker> worker(new ChannelNodeWorker(
           std::move(receivers[i]), node->take_dispatcher()));
@@ -171,8 +182,8 @@ class TestCluster {
   std::vector<std::thread>                       worker_threads_;
   std::vector<rusty::Box<ChannelNodeWorker>>     workers_;
   std::vector<rusty::Box<RaftNode>>              nodes_;
-  std::vector<rusty::Box<MemorySnapshotManager>> snaps_;
-  std::vector<rusty::Box<InMemoryLogStorage>>    logs_;
+  std::vector<std::shared_ptr<MemorySnapshotManager>> snaps_;
+  std::vector<std::shared_ptr<InMemoryLogStorage>>    logs_;
   std::vector<siteid_t>                          site_ids_;
   ChannelSwitchboard                             sw_;
 };

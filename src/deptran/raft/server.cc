@@ -1954,11 +1954,10 @@ bool RaftServer::RequestVote() {
 
   // for(int i = 0; i < 1000; i++) Log_info("not calling the wrong method");
 
-  parid_t loc_id = 0;
-  // @unsafe
-  {
-  loc_id = this->frame_->site_info_->locale_id ;
-  }
+  // RaftServer owns its location identity; production workers initialize this
+  // before any timer can invoke RequestVote(). Keeping the election path on
+  // that owned field also lets the in-memory harness avoid a dummy Frame.
+  locid_t loc_id = loc_id_;
 
   uint32_t lstoff = 0  ;
   slotid_t lst_idx = 0 ;

@@ -700,22 +700,31 @@ the virtual `LogStorage` / `SnapshotManager` interfaces at
 `RaftServer` wrapped via `RaftServerDispatcher`. Each node uses
 `ChannelTransportAdapter` pointing at a shared `ChannelSwitchboard`.
 
-- [ ] `src/deptran/raft/raft_node.hpp`:
-  - Replace `rusty::Arc<DummyDispatcher> dispatcher_impl_` with
-    `rusty::Box<RaftServer> server_`.
-  - Constructor: build a `RaftServer` with `transport_ =
-    make_channel_transport(sw_, self, par)`, `log_storage_` =
-    `InMemoryLogStorage`, `snapshot_manager_` = `MemorySnapshotManager`.
-    Wrap with `make_raft_server_dispatcher(server_.get())` and store
-    the resulting `DispatcherProxy`.
-  - Wire the server into its Raft timers/fibers:
-    `server_->StartElectionTimer()`, `server_->HeartbeatLoop()`,
-    `server_->StartApplyThread()` / `StartApplyFiber()` — exactly as
-    `deptran_server` does today but without a `deptran_server` binary.
-- [ ] Delete `DummyDispatcher` once nothing references it.
-- [ ] `TestCluster::with_in_memory_transport(n)`: keep the existing
-  wiring but ensure each node's RaftServer is in a state ready to
-  accept the first `HeartbeatLoop` tick.
+- [x] `RaftNode` has a dispatcher-injection constructor and transfers that
+  exact move-only `DispatcherProxy` once to its `ChannelNodeWorker`.
+  This is the ownership seam needed by `RaftServerDispatcher`; the default
+  constructor still injects `DummyDispatcher` until real-server bootstrap is
+  complete. Covered by `RaftTestClusterTest.NodeTransfersAnInjectedDispatcher`.
+- [ ] Add a minimal, explicit `RaftServer` test bootstrap. It must configure
+  site/partition identity, the complete peer set, a supplied
+  `ChannelTransportAdapter`, `InMemoryLogStorage`, and
+  `MemorySnapshotManager` without reading global `Config`, requiring a
+  `Frame`, or starting production persistence/ReplicatedDB setup. Keep this
+  separate from `Setup()` so production startup semantics remain unchanged.
+- [ ] Make each `RaftNode` own one real server with that bootstrap, inject
+  `make_raft_server_dispatcher(server)` into its worker, and delegate
+  `is_leader()`, `current_term()`, and `commit_index()` to the server. Remove
+  the placeholder state fields and the default `DummyDispatcher` only after
+  this path is exercised.
+- [ ] Define test-server lifecycle explicitly: start only the election,
+  heartbeat, and apply machinery that the in-memory reactor can drive; on
+  kill/restart, stop/join it before destroying the server, construct a fresh
+  server using the retained in-memory storage, then replace its worker
+  dispatcher. A stopped worker must never hold a dangling server pointer.
+- [ ] `TestCluster::with_in_memory_transport(n)`: retain the current channel
+  wiring and per-site storage, but ensure all real servers are initialized
+  before the first election tick. Restarting one node must preserve unrelated
+  directed drops and partitions.
 - [ ] New gtest cases in `tests/raft_test_cluster_test.cc`:
   - Election converges: construct 3-node cluster, step until
     exactly one `node(i).is_leader()` is true.
@@ -731,12 +740,12 @@ the virtual `LogStorage` / `SnapshotManager` interfaces at
 
 - RaftServer's startup path expects a full deptran environment
   (Config, Frame, rep_frame_, tx_sched_ etc.). Need to either:
-  - (a) Teach RaftServer to accept a minimal "test mode" init that
-    skips tx_sched_ wiring, OR
+  - (a) provide the minimal bootstrap above, OR
   - (b) Build just enough of the surrounding scaffolding in
     TestCluster.
-  Probably (a) — add a `RaftServer(/*test_mode*/)` constructor that
-  skips `tx_sched_` setup.
+  Prefer (a), but do not add a boolean `test_mode` constructor: use named
+  dependencies so the production and test initialization contracts are
+  auditable.
 - Fiber scheduling: RaftServer's timers use `Fiber::create_run` +
   `Fiber::sleep` — depends on `rrr::Reactor` running. In a test
   binary that doesn't use `deptran_server`, a `rrr::PollThread` must

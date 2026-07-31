@@ -1856,6 +1856,40 @@ class RaftServer : public TxLogServer {
     return transport_.as_mut().unwrap();
   }
 
+  // Test-only bootstrap for the in-process ChannelTransport harness.  This
+  // deliberately does not call Setup(): production Setup() owns persistence,
+  // Frame/Config discovery, and detached background fibers.  The harness
+  // supplies every dependency it needs explicitly instead.
+  // @unsafe - installs externally owned transport/storage dependencies.
+  void InitializeForInMemoryTest(siteid_t site_id,
+                                 locid_t loc_id,
+                                 parid_t partition_id,
+                                 const std::vector<siteid_t>& peers,
+                                 raft::TransportProxy transport,
+                                 std::shared_ptr<janus::raft::LogStorage> storage,
+                                 std::shared_ptr<janus::raft::SnapshotManager> snapshots) {
+    verify(!peers.empty());
+    verify(std::find(peers.begin(), peers.end(), site_id) != peers.end());
+    site_id_ = site_id;
+    loc_id_ = loc_id;
+    partition_id_ = partition_id;
+    transport_ = rusty::Some(std::move(transport));
+    log_storage_ = std::move(storage);
+    snapshot_manager_ = std::move(snapshots);
+    current_config().clear();
+    current_config().insert(peers.begin(), peers.end());
+    learners().clear();
+    stop_ = false;
+    looping_ = true;
+    heartbeat_ = false;
+    heartbeat_setup_ = true;
+    leadership_core_.set_startup_timestamp(Time::now(false));
+  }
+
+  // @unsafe - runs the existing election path synchronously for the
+  // in-memory harness. The configured transport and peer set are required.
+  bool StartElectionForInMemoryTest() { return RequestVote(); }
+
   slotid_t min_active_slot_ = 1; // anything before (lt) this slot is freed
   slotid_t max_executed_slot_ = 0;
   slotid_t max_committed_slot_ = 0;
