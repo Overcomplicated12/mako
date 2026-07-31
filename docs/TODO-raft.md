@@ -581,7 +581,7 @@ The full lab range and throughput gate remain pending.
 calls the existing `RaftServer::OnX(...)` with output-pointer args,
 and returns the filled `Reply`.
 
-- [ ] Create `src/deptran/raft/raft_server_dispatcher.hpp`:
+- [x] Create `src/deptran/raft/raft_server_dispatcher.hpp`:
   - `class RaftServerDispatcher { RaftServer* svr_; public: 8 handle_*
     methods }`.
   - Each `handle_*`:
@@ -593,11 +593,16 @@ and returns the filled `Reply`.
       pack locals into `Reply`, return it.
   - Factory:
     `inline DispatcherProxy make_raft_server_dispatcher(RaftServer*)`.
-- [ ] Unit test `tests/raft_server_dispatcher_test.cc`: construct a
-  minimal RaftServer (or mock), wrap in dispatcher, exercise each
-  handle_*.
-- [ ] Gate: `test_raft_server_dispatcher` + all existing
-  `test_raft_*` green.
+  All eight handlers preserve the current service failure defaults; the
+  `NotifyRestart` adapter also preserves the reconnect result before it
+  invalidates the restarted peer's speculative state.
+- [x] Unit test `tests/raft_server_dispatcher_test.cc`: wraps a null server
+  and exercises every handler's lifecycle/default-reply path. The test object
+  compiles with Clang 22, type-checking every `RaftServer::OnX` call.
+- [ ] Gate: link and run `test_raft_server_dispatcher` + all existing
+  `test_raft_*`. Currently blocked by pre-existing `src/deptran/raft/test.cc`
+  compile failures (the `Init` macro collision and stale `current_config_` /
+  `learners_` test references), which are pulled in by `txlog_core_obj`.
 - [ ] **Commit**: `raft: phase 8.2 — RaftServerDispatcher + factory`.
 
 ### 8.2 risks
@@ -839,7 +844,7 @@ verification. Listed here so they don't get lost.
 - [x] Phase 8.1c — migrate BroadcastVote (implementation; validation pending)
 - [x] Phase 8.1d — migrate SendAppendEntries / SendAppendEntries2 (implementation; validation pending)
 - [ ] Phase 8.1e — retire remaining commo() outbound sites
-- [ ] Phase 8.2 — RaftServerDispatcher
+- [x] Phase 8.2 — RaftServerDispatcher (implementation; full test gate pending)
 - [ ] Phase 8.3 — RaftServiceImpl → DispatcherProxy
 - [ ] Phase 8.4 — storage proxies (optional)
 - [ ] Phase 8.5 — TestCluster with real RaftServer

@@ -15,9 +15,9 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <filesystem>
 #include <memory>
 #include <string>
+#include <sys/stat.h>
 #include <utility>
 
 #include <rusty/cell.hpp>
@@ -463,16 +463,17 @@ class RecoveryManager {
     }
 
     // Check if storage directory exists and has RocksDB data
-    std::error_code ec;
-    bool exists = std::filesystem::exists(core_.config_.storage_path, ec);  // @unsafe
-    if (!exists || ec) {  // @unsafe
+    struct stat statbuf {};
+    bool exists =
+        ::stat(core_.config_.storage_path.c_str(), &statbuf) == 0;  // @unsafe
+    if (!exists) {  // @unsafe
       return RecoveryMode::FRESH_START;
     }
 
     // Check for CURRENT file which indicates valid RocksDB
     std::string current_file = core_.config_.storage_path + "/CURRENT";
-    exists = std::filesystem::exists(current_file, ec);  // @unsafe
-    if (!exists || ec) {  // @unsafe
+    exists = ::stat(current_file.c_str(), &statbuf) == 0;  // @unsafe
+    if (!exists) {  // @unsafe
       return RecoveryMode::FRESH_START;
     }
 

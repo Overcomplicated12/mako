@@ -2324,6 +2324,14 @@ if(BUILD_TESTS)
     target_link_libraries(test_raft_dispatcher_facade ${GTEST_LIBRARIES} ${GTEST_MAIN_LIBRARIES} pthread rrr)
     add_test(NAME test_raft_dispatcher_facade COMMAND test_raft_dispatcher_facade)
 
+    add_executable(test_raft_server_dispatcher tests/raft_server_dispatcher_test.cc)
+    target_include_directories(test_raft_server_dispatcher PRIVATE ${TEST_INCLUDE_DIRS} ${GTEST_INCLUDE_DIRS})
+    target_compile_options(test_raft_server_dispatcher PRIVATE ${TEST_COMPILE_OPTIONS})
+    target_link_libraries(test_raft_server_dispatcher
+        ${GTEST_LIBRARIES} ${GTEST_MAIN_LIBRARIES} pthread txlog_core_obj
+        yaml-cpp rocksdb lz4 ${CMAKE_DL_LIBS} Python3::Python)
+    add_test(NAME test_raft_server_dispatcher COMMAND test_raft_server_dispatcher)
+
     add_executable(test_raft_channel_transport tests/raft_channel_transport_test.cc)
     target_include_directories(test_raft_channel_transport PRIVATE ${TEST_INCLUDE_DIRS} ${GTEST_INCLUDE_DIRS})
     target_compile_options(test_raft_channel_transport PRIVATE ${TEST_COMPILE_OPTIONS})
