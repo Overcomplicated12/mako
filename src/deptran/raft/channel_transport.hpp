@@ -27,6 +27,7 @@
  *    can cross mpsc boundaries.
  */
 
+#include <algorithm>
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -290,6 +291,17 @@ class ChannelSwitchboard {
   // @safe - fault-injection accessors
   void drop_direction(siteid_t from, siteid_t to) {
     state_core_.faults_mut().dropped.emplace_back(from, to);
+  }
+  // @safe - removes exactly one directed fault while preserving unrelated
+  // drops and any active partition fault.
+  void undrop_direction(siteid_t from, siteid_t to) {
+    auto& dropped = state_core_.faults_mut().dropped;
+    dropped.erase(
+        std::remove_if(dropped.begin(), dropped.end(),
+                       [from, to](const auto& fault) {
+                         return fault.first == from && fault.second == to;
+                       }),
+        dropped.end());
   }
   void partition(std::vector<std::vector<siteid_t>> groups) {
     state_core_.faults_mut().partitions = std::move(groups);

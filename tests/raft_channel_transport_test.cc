@@ -177,6 +177,31 @@ TEST(RaftChannelTransportTest, DropDirectionFallsBackToDefault) {
   EXPECT_EQ(counts_b->n_timeout.load(), 1);
 }
 
+TEST(RaftChannelTransportTest, UndropRestoresOnlyTheSelectedDirection) {
+  ChannelSwitchboard sw;
+  auto rx_a = sw.register_site(1);
+  auto rx_b = sw.register_site(2);
+  auto* raw_a = new RecordingDispatcher();
+  auto* raw_b = new RecordingDispatcher();
+  DispatcherProxy disp_a(raw_a);
+  DispatcherProxy disp_b(raw_b);
+  ChannelNodeWorker w_a{std::move(rx_a), std::move(disp_a)};
+  ChannelNodeWorker w_b{std::move(rx_b), std::move(disp_b)};
+  WorkerHarness ha{&w_a};
+  WorkerHarness hb{&w_b};
+  TransportProxy from_one = make_channel_transport(&sw, 1, 0);
+  TransportProxy from_two = make_channel_transport(&sw, 2, 0);
+
+  sw.drop_direction(1, 2);
+  sw.drop_direction(2, 1);
+  EXPECT_FALSE(from_one->send_timeout_now(2, TimeoutNowReq{}).success);
+  EXPECT_FALSE(from_two->send_timeout_now(1, TimeoutNowReq{}).success);
+
+  sw.undrop_direction(1, 2);
+  EXPECT_TRUE(from_one->send_timeout_now(2, TimeoutNowReq{}).success);
+  EXPECT_FALSE(from_two->send_timeout_now(1, TimeoutNowReq{}).success);
+}
+
 TEST(RaftChannelTransportTest, DroppedReplyRpcsUseDefaultsAndRecover) {
   ChannelSwitchboard sw;
   auto rx_a = sw.register_site(1);

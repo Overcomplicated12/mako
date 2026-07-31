@@ -599,10 +599,13 @@ and returns the filled `Reply`.
 - [x] Unit test `tests/raft_server_dispatcher_test.cc`: wraps a null server
   and exercises every handler's lifecycle/default-reply path. The test object
   compiles with Clang 22, type-checking every `RaftServer::OnX` call.
-- [ ] Gate: link and run `test_raft_server_dispatcher` + all existing
-  `test_raft_*`. Currently blocked by pre-existing `src/deptran/raft/test.cc`
-  compile failures (the `Init` macro collision and stale `current_config_` /
-  `learners_` test references), which are pulled in by `txlog_core_obj`.
+- [x] Gate: link and run `test_raft_server_dispatcher` + all existing
+  `test_raft_*`. [26:07:31] Fresh Clang 22 `build-raft-full` passes all nine
+  configured targets: messages, transport facade, RRR transport compile,
+  quorum, dispatcher facade, server dispatcher, channel transport, memory
+  snapshot manager, and test cluster. The former `test.cc` `Init` macro
+  collision and stale membership-field references were fixed in
+  `7e7f3f4d`.
 - [x] Edge coverage that does not require a live `RaftServer`: the null-server
   dispatcher test exercises every reply shape, while
   `test_raft_channel_transport` drops the direction for every reply-bearing
@@ -611,7 +614,7 @@ and returns the filled `Reply`.
   The same test covers fire-and-forget `VoteDurable`,
   `AppendEntriesDurable`, and `NotifyRestart`: a dropped direction delivers
   none, then fault reset delivers each exactly once.
-- [ ] **Commit**: `raft: phase 8.2 — RaftServerDispatcher + factory`.
+- [x] **Commit**: `16b13862 raft: phase 8.2 add server dispatcher adapter`.
 
 ### 8.2 risks
 
@@ -657,8 +660,7 @@ the corresponding dispatcher `handle_x(req)`.
   verify no request uses a cached dispatcher/server pointer. The current
   short-lived dispatcher design is intended to make this safe, but it needs
   the full harness to validate the lifetime race.
-- [ ] **Commit**: `raft: phase 8.3 — RaftServiceImpl forwards to
-  DispatcherProxy`.
+- [x] **Commit**: `6f33fdda raft: phase 8.3 route service through dispatcher`.
 
 ### 8.3 lifecycle note
 
@@ -768,10 +770,10 @@ on the 5-server deptran topology.
 - [ ] Keep the existing rrr-based `RaftTestConfig(std::vector<Frame*>)`
   constructor intact so `deptran_server -f raft_lab_test.yml` keeps
   working.
-- [ ] Switchboard API additions (likely in
-  `src/deptran/raft/channel_transport.hpp`):
-  - `undrop_direction(siteid_t from, siteid_t to)`: remove from
-    `ChannelFaults::dropped`.
+- [x] Switchboard API addition in `src/deptran/raft/channel_transport.hpp`:
+  `undrop_direction(siteid_t from, siteid_t to)` removes only that directed
+  drop while preserving reverse-direction and partition faults. Covered by
+  `RaftChannelTransportTest.UndropRestoresOnlyTheSelectedDirection`.
 - [ ] Gate: subset of `RaftLabTest` runs against the new
   constructor (see 8.7 for the full driver). Minimally: `testInitialElection`,
   `testReElection`, `testBasicAgree`, `testFailAgree`.
