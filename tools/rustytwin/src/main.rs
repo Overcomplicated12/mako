@@ -77,6 +77,14 @@ fn module_check(args: &[String]) -> Result<u8, String> {
         BuildRole::Candidate,
         optional_option(args, "--candidate-build").map(PathBuf::from),
     )?;
+    if has_flag(args, "--build") {
+        build_module_target("baseline", &baseline_build, &manifest.module.test_target)?;
+        if canonical_paths_match(&baseline_build, &candidate_build) {
+            println!("Reusing baseline build for candidate target.");
+        } else {
+            build_module_target("candidate", &candidate_build, &manifest.module.test_target)?;
+        }
+    }
     let baseline_test = manifest.test_path(&baseline_build);
     let candidate_test = manifest.test_path(&candidate_build);
     validate_test_binary("baseline", &baseline_test)?;
@@ -362,6 +370,50 @@ fn validate_test_binary(role: &str, path: &std::path::Path) -> Result<(), String
     }
 }
 
+fn build_module_target(
+    role: &str,
+    build_dir: &std::path::Path,
+    target: &str,
+) -> Result<(), String> {
+    println!("Building {role} target {target}...");
+    let output = Command::new("cmake")
+        .arg("--build")
+        .arg(build_dir)
+        .arg("--target")
+        .arg(target)
+        .output()
+        .map_err(|error| {
+            format!(
+                "could not start {role} build in {}: {error}",
+                build_dir.display()
+            )
+        })?;
+    if output.status.success() {
+        println!("Built {role} target {target}.");
+        return Ok(());
+    }
+    Err(format!(
+        "{role} build failed for target {target} in {}:\n{}",
+        build_dir.display(),
+        command_diagnostics(&output)
+    ))
+}
+
+fn command_diagnostics(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let diagnostics = if stderr.trim().is_empty() {
+        stdout.as_ref()
+    } else {
+        stderr.as_ref()
+    };
+    let lines: Vec<_> = diagnostics.lines().rev().take(20).collect();
+    if lines.is_empty() {
+        return format!("cmake exited with status {}", output.status);
+    }
+    lines.into_iter().rev().collect::<Vec<_>>().join("\n")
+}
+
 fn tool_version(program: &str, argument: &str) -> Result<String, String> {
     let output = Command::new(program)
         .arg(argument)
@@ -435,7 +487,7 @@ fn has_flag(args: &[String], flag: &str) -> bool {
 }
 
 fn usage() -> String {
-    "Usage:\n  rustytwin init --module <path> --test-target <target> [--baseline-build <dir>] [--candidate-build <dir>] [--filter <gtest-filter>] [--timeout-ms <ms>]\n  rustytwin doctor --module <path> [--baseline-build <dir>] [--candidate-build <dir>]\n  rustytwin check --module <path> --out <dir> [--baseline-build <dir>] [--candidate-build <dir>] [--filter <gtest-filter>] [--timeout-ms <ms>] [--show-output]\n  rustytwin check <module-path> --out <dir> [module check options]\n  rustytwin check --baseline-bin <path> --candidate-bin <path> --tape <path> --out <dir> [--timeout-ms <ms>] [--show-output]\n  rustytwin gtest-check --baseline-test <path> --candidate-test <path> --out <dir> [--filter <gtest-filter> | --tape <path>] [--timeout-ms <ms>] [--show-output]\n  rustytwin replay <artifact>".to_owned()
+    "Usage:\n  rustytwin init --module <path> --test-target <target> [--baseline-build <dir>] [--candidate-build <dir>] [--filter <gtest-filter>] [--timeout-ms <ms>]\n  rustytwin doctor --module <path> [--baseline-build <dir>] [--candidate-build <dir>]\n  rustytwin check --module <path> --out <dir> [--build] [--baseline-build <dir>] [--candidate-build <dir>] [--filter <gtest-filter>] [--timeout-ms <ms>] [--show-output]\n  rustytwin check <module-path> --out <dir> [module check options]\n  rustytwin check --baseline-bin <path> --candidate-bin <path> --tape <path> --out <dir> [--timeout-ms <ms>] [--show-output]\n  rustytwin gtest-check --baseline-test <path> --candidate-test <path> --out <dir> [--filter <gtest-filter> | --tape <path>] [--timeout-ms <ms>] [--show-output]\n  rustytwin replay <artifact>".to_owned()
 }
 
 #[cfg(test)]

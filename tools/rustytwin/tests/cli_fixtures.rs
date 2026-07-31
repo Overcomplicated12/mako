@@ -88,6 +88,26 @@ fn install_gtest_fixture(build_dir: &Path, fixture_name: &str, target: &str) {
     fs::set_permissions(target_path, permissions).unwrap();
 }
 
+#[cfg(unix)]
+fn configure_fixture_build(source_dir: &Path, build_dir: &Path) {
+    fs::create_dir_all(source_dir).unwrap();
+    fs::write(
+        source_dir.join("CMakeLists.txt"),
+        "cmake_minimum_required(VERSION 3.20)\nproject(rustytwin_fixture NONE)\nadd_custom_target(test_raft_quorum)\n",
+    )
+    .unwrap();
+    let output = Command::new("cmake")
+        .args([
+            "-S",
+            source_dir.to_str().unwrap(),
+            "-B",
+            build_dir.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", stdout(&output));
+}
+
 #[test]
 fn equivalent_fixture_passes_despite_elapsed_metadata() {
     let output_dir = output_dir("equivalent");
@@ -223,11 +243,14 @@ fn gtest_check_can_show_captured_console_output() {
 #[test]
 fn module_manifest_discovers_gtest_targets_and_doctor_validates_them() {
     let root = output_dir("module-manifest");
+    let source_dir = root.join("source");
     let baseline_build = root.join("baseline");
     let candidate_build = root.join("candidate");
     let manifest = root.join("raft-quorum.toml");
     let comparison_output = root.join("out");
     let _ = fs::remove_dir_all(&root);
+    configure_fixture_build(&source_dir, &baseline_build);
+    configure_fixture_build(&source_dir, &candidate_build);
     install_gtest_fixture(&baseline_build, "passing", "test_raft_quorum");
     install_gtest_fixture(&candidate_build, "passing", "test_raft_quorum");
 
@@ -262,12 +285,15 @@ fn module_manifest_discovers_gtest_targets_and_doctor_validates_them() {
             "check",
             "--module",
             manifest.to_str().unwrap(),
+            "--build",
             "--out",
             comparison_output.to_str().unwrap(),
         ])
         .output()
         .unwrap();
     assert!(check.status.success(), "{}", stdout(&check));
+    assert!(stdout(&check).contains("Built baseline target test_raft_quorum."));
+    assert!(stdout(&check).contains("Built candidate target test_raft_quorum."));
     assert!(stdout(&check).contains("Behavioral migration check: PASSED"));
     let _ = fs::remove_dir_all(root);
 }

@@ -49,9 +49,16 @@ Then run the comparison with the short module form:
 ```bash
 cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- check \
   --module tools/rustytwin/modules/raft-quorum.toml \
+  --build \
   --out /tmp/rustytwin-raft-quorum \
   --show-output
 ```
+
+`--build` runs `cmake --build <build-dir> --target <test-target>` for each
+side before launching the check. RustyTwin stops at the first failed build and
+prints the tail of that side's CMake diagnostics. When both sides use the same
+build directory, it builds once and labels the result as an identity smoke
+check.
 
 You can override either configured build directory without editing TOML:
 
