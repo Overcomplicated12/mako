@@ -616,37 +616,36 @@ and returns the filled `Reply`.
 
 **Goal**: `RaftServiceImpl`'s fiber-RPC overrides stop calling
 `svr->OnX` directly and instead call
-`dispatcher_->handle_x(req)`.
+the corresponding dispatcher `handle_x(req)`.
 
-- [ ] `src/deptran/raft/service.h`: add member
-  `rusty::Option<DispatcherProxy> dispatcher_;` (Option because the
-  dispatcher is set after the server is registered).
-- [ ] `src/deptran/raft/service.cc`:
-  - In the constructor or `UpdateServer()`: call
-    `dispatcher_ = rusty::Some(make_raft_server_dispatcher(svr))`
-    when svr is set.
-  - Each override method (`Vote`, `VoteDurable`, `AppendEntries`,
-    `EmptyAppendEntries`, `AppendEntriesDurable`, `TimeoutNow`,
-    `NotifyRestart`, `InstallSnapshot`, `AddServer`, `RemoveServer`):
-    replace the body's `svr->OnX(...)` calls with
-    `return Result<Resp, i32>::Ok(dispatcher_->handle_x(req))`.
-  - The null/disconnected guard stays — if `dispatcher_.is_none()`,
-    return `Ok(default_reply)` with the same shape current code uses.
-- [ ] Delete the `#include "server.h"` header if no longer needed
-  (the dispatcher adapter references RaftServer internally).
+- [x] Do not cache a `DispatcherProxy`: `UpdateServer()` atomically swaps a
+  borrowed `RaftServer*` during Kill/Restart, so every handler constructs a
+  short-lived dispatcher from the current pointer instead.
+- [x] `src/deptran/raft/service.cc`:
+  - `Vote`, `VoteDurable`, `AppendEntries`, `EmptyAppendEntries`,
+    `AppendEntriesDurable`, `TimeoutNow`, `NotifyRestart`, and
+    `InstallSnapshot` convert their rrr request/reply payloads at the service
+    boundary and call the corresponding `DispatcherBase::handle_*` method.
+  - The dispatcher owns the null/disconnected defaults and `NotifyRestart`'s
+    reconnect + peer-reset behavior; duplicate service implementations are
+    removed.
+  - `AddServer` and `RemoveServer` remain direct because `DispatcherBase`
+    intentionally does not yet declare membership-management methods.
+- [x] Remove the now-redundant direct `server.h` include from `service.cc`;
+  `service.h` still needs the complete type for its atomic borrowed pointer.
 - [ ] Gate: lab test tests 1-60 all pass. Pay attention to
   `NotifyRestart` — it has side effects (calls `commo->ReconnectToSite`
   + `svr->OnPeerRestart`).
 - [ ] **Commit**: `raft: phase 8.3 — RaftServiceImpl forwards to
   DispatcherProxy`.
 
-### 8.3 risks
+### 8.3 lifecycle note
 
-- `NotifyRestart` is the odd one — it's currently a service-level
-  method that reconnects the rrr client. In `RaftServerDispatcher`
-  the dispatcher has no `commo_` to call `ReconnectToSite` on. Either
-  keep `NotifyRestart` as a service-level concern (no dispatcher) or
-  thread the commo reference through.
+- Do not retain a dispatcher across `UpdateServer()`: it would borrow the
+  replaced server. Creating one from the current atomic pointer per RPC keeps
+  the original Kill/Restart behavior. `NotifyRestart` is safe to dispatch
+  because `RaftServerDispatcher` performs the server's communicator reconnect
+  before invalidating the restarted peer.
 
 ## Phase 8.4 — storage proxies (optional)
 
@@ -845,7 +844,7 @@ verification. Listed here so they don't get lost.
 - [x] Phase 8.1d — migrate SendAppendEntries / SendAppendEntries2 (implementation; validation pending)
 - [ ] Phase 8.1e — retire remaining commo() outbound sites
 - [x] Phase 8.2 — RaftServerDispatcher (implementation; full test gate pending)
-- [ ] Phase 8.3 — RaftServiceImpl → DispatcherProxy
+- [x] Phase 8.3 — RaftServiceImpl → DispatcherProxy (implementation; full test gate pending)
 - [ ] Phase 8.4 — storage proxies (optional)
 - [ ] Phase 8.5 — TestCluster with real RaftServer
 - [ ] Phase 8.6 — port RaftTestConfig to TestCluster

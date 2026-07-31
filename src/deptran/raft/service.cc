@@ -1,5 +1,5 @@
 #include "service.h"
-#include "server.h"
+#include "raft_server_dispatcher.hpp"
 
 #include "rrr/rrr.hpp"
 #include <rusty/slice.hpp>
@@ -24,34 +24,6 @@ pub fn raft_service_server_unavailable(has_server: bool,
     !has_server || disconnected
 }
 
-pub fn raft_service_default_vote_granted() -> bool {
-    false
-}
-
-pub fn raft_service_default_acknowledged() -> bool {
-    false
-}
-
-pub fn raft_service_default_append_ok() -> u64 {
-    0
-}
-
-pub fn raft_service_default_term() -> u64 {
-    0
-}
-
-pub fn raft_service_default_last_log_index() -> u64 {
-    0
-}
-
-pub fn raft_service_memory_ack_type() -> u64 {
-    0
-}
-
-pub fn raft_service_default_timeout_success() -> bool {
-    false
-}
-
 pub fn raft_service_default_config_success() -> bool {
     false
 }
@@ -60,64 +32,19 @@ pub fn raft_service_default_leader_hint() -> u64 {
     0
 }
 
-pub fn raft_service_should_reconnect(has_commo: bool) -> bool {
-    has_commo
-}
-
-pub fn raft_service_notify_ack_from_reconnect(success: bool) -> bool {
-    success
-}
-
 pub fn raft_service_poll_thread_available(found: bool,
                                           has_poll_thread: bool) -> bool {
     found && has_poll_thread
 }
 #endif
-/*RUSTYCPP:GEN-BEGIN id=service.1 version=1 rust_sha256=692b4d993ef0f2302bebbf21d9e2e1b70617a8bac00c6b517d5ae2f8418ff3dd*/
+/*RUSTYCPP:GEN-BEGIN id=service.1 version=1 rust_sha256=d6b4f4c07cacc4498f30aa1427536ca90b81dbe64e20d8821b9337cec8ad2dd4*/
 bool raft_service_server_unavailable(bool has_server, bool disconnected);
-bool raft_service_default_vote_granted();
-bool raft_service_default_acknowledged();
-uint64_t raft_service_default_append_ok();
-uint64_t raft_service_default_term();
-uint64_t raft_service_default_last_log_index();
-uint64_t raft_service_memory_ack_type();
-bool raft_service_default_timeout_success();
 bool raft_service_default_config_success();
 uint64_t raft_service_default_leader_hint();
-bool raft_service_should_reconnect(bool has_commo);
-bool raft_service_notify_ack_from_reconnect(bool success);
 bool raft_service_poll_thread_available(bool found, bool has_poll_thread);
 
 bool raft_service_server_unavailable(bool has_server, bool disconnected) {
     return !has_server || rusty::detail::deref_if_pointer_like(disconnected);
-}
-
-bool raft_service_default_vote_granted() {
-    return false;
-}
-
-bool raft_service_default_acknowledged() {
-    return false;
-}
-
-uint64_t raft_service_default_append_ok() {
-    return static_cast<uint64_t>(0);
-}
-
-uint64_t raft_service_default_term() {
-    return static_cast<uint64_t>(0);
-}
-
-uint64_t raft_service_default_last_log_index() {
-    return static_cast<uint64_t>(0);
-}
-
-uint64_t raft_service_memory_ack_type() {
-    return static_cast<uint64_t>(0);
-}
-
-bool raft_service_default_timeout_success() {
-    return false;
 }
 
 bool raft_service_default_config_success() {
@@ -126,14 +53,6 @@ bool raft_service_default_config_success() {
 
 uint64_t raft_service_default_leader_hint() {
     return static_cast<uint64_t>(0);
-}
-
-bool raft_service_should_reconnect(bool has_commo) {
-    return std::move(has_commo);
-}
-
-bool raft_service_notify_ack_from_reconnect(bool success) {
-    return std::move(success);
 }
 
 bool raft_service_poll_thread_available(bool found, bool has_poll_thread) {
@@ -150,125 +69,84 @@ bool raft_service_poll_thread_available(bool found, bool has_poll_thread) {
 // the response struct by value. The framework marshals and sends the
 // reply when the fiber completes; no DeferredReply anywhere.
 //
-// Disconnected/killed server path: fill the response with the same
-// defaults the old RpcHandler macro's OnDisconnected##name bodies used,
-// and return Ok(resp). We deliberately do NOT return Err(...): the
-// peer code treats nonzero error codes as "drop this reply", which
-// would hide the disconnected-server signal that other code paths
-// depend on (e.g., lost-RPC detection in SendAppendEntries).
+// Each handler converts the rrr wire payload at this boundary and delegates
+// it to a short-lived RaftServerDispatcher built from the current atomic
+// borrowed server pointer. The adapter owns the disconnected defaults and
+// returns a value reply, so we deliberately do NOT return Err(...): peers
+// treat nonzero error codes as a dropped reply.
 // =====================================================================
 
 Result<RaftService::RpcVoteResponse, rrr::i32>
 RaftServiceImpl::Vote(const RpcVoteRequest& req) {
+  auto dispatcher = raft::make_raft_server_dispatcher(GetServer());
+  auto reply = dispatcher->handle_vote(
+      raft::VoteReq{req.lst_log_idx, req.lst_log_term, req.site_id, req.cur_term});
   RpcVoteResponse resp{};
-  RaftServer* svr = GetServer();
-  bool has_server = svr != nullptr;
-  bool disconnected = has_server && svr->IsDisconnected();
-  if (raft_service_server_unavailable(has_server, disconnected)) {
-    resp.max_ballot = req.cur_term;
-    resp.vote_granted = raft_service_default_vote_granted();
-    return Result<RpcVoteResponse, rrr::i32>::Ok(resp);
-  }
-  svr->OnRequestVote(req.lst_log_idx, req.lst_log_term,
-                     req.site_id, req.cur_term,
-                     &resp.max_ballot, &resp.vote_granted);
+  resp.max_ballot = reply.max_ballot;
+  resp.vote_granted = reply.vote_granted;
   return Result<RpcVoteResponse, rrr::i32>::Ok(resp);
 }
 
 Result<RaftService::RpcVoteDurableResponse, rrr::i32>
 RaftServiceImpl::VoteDurable(const RpcVoteDurableRequest& req) {
+  auto dispatcher = raft::make_raft_server_dispatcher(GetServer());
+  auto reply = dispatcher->handle_vote_durable(
+      raft::VoteDurableReq{req.term, req.voter_id});
   RpcVoteDurableResponse resp{};
-  RaftServer* svr = GetServer();
-  bool has_server = svr != nullptr;
-  bool disconnected = has_server && svr->IsDisconnected();
-  if (raft_service_server_unavailable(has_server, disconnected)) {
-    resp.acknowledged = raft_service_default_acknowledged();
-    return Result<RpcVoteDurableResponse, rrr::i32>::Ok(resp);
-  }
-  svr->OnVoteDurable(req.term, req.voter_id, &resp.acknowledged);
+  resp.acknowledged = reply.acknowledged;
   return Result<RpcVoteDurableResponse, rrr::i32>::Ok(resp);
 }
 
 Result<RaftService::RpcAppendEntriesResponse, rrr::i32>
 RaftServiceImpl::AppendEntries(const RpcAppendEntriesRequest& req) {
+  auto dispatcher = raft::make_raft_server_dispatcher(GetServer());
+  auto reply = dispatcher->handle_append_entries(raft::AppendEntriesReq{
+      req.slot, req.ballot, req.leaderCurrentTerm, req.leaderSiteId,
+      req.leaderPrevLogIndex, req.leaderPrevLogTerm, req.leaderCommitIndex,
+      req.cmd, req.leaderNextLogTerm});
   RpcAppendEntriesResponse resp{};
-  RaftServer* svr = GetServer();
-  bool has_server = svr != nullptr;
-  bool disconnected = has_server && svr->IsDisconnected();
-  if (raft_service_server_unavailable(has_server, disconnected)) {
-    resp.followerAppendOK = raft_service_default_append_ok();
-    resp.followerCurrentTerm = raft_service_default_term();
-    resp.followerLastLogIndex = raft_service_default_last_log_index();
-    resp.followerAckType = raft_service_memory_ack_type();
-    return Result<RpcAppendEntriesResponse, rrr::i32>::Ok(resp);
-  }
-  resp.followerAckType = raft_service_memory_ack_type();
-  svr->OnAppendEntries(req.slot, req.ballot, req.leaderCurrentTerm,
-                       req.leaderSiteId, req.leaderPrevLogIndex,
-                       req.leaderPrevLogTerm, req.leaderCommitIndex,
-                       req.cmd, req.leaderNextLogTerm,
-                       &resp.followerAppendOK, &resp.followerCurrentTerm,
-                       &resp.followerLastLogIndex);
+  resp.followerAppendOK = reply.follower_append_ok;
+  resp.followerCurrentTerm = reply.follower_current_term;
+  resp.followerLastLogIndex = reply.follower_last_log_index;
+  resp.followerAckType = reply.follower_ack_type;
   return Result<RpcAppendEntriesResponse, rrr::i32>::Ok(resp);
 }
 
 Result<RaftService::RpcEmptyAppendEntriesResponse, rrr::i32>
 RaftServiceImpl::EmptyAppendEntries(const RpcEmptyAppendEntriesRequest& req) {
   Log_debug("RaftServiceImpl: EmptyAppendEntries answering leader {}", req.leaderSiteId);
+  auto dispatcher = raft::make_raft_server_dispatcher(GetServer());
+  auto reply = dispatcher->handle_empty_append_entries(
+      raft::EmptyAppendEntriesReq{
+          req.slot, req.ballot, req.leaderCurrentTerm, req.leaderSiteId,
+          req.leaderPrevLogIndex, req.leaderPrevLogTerm, req.leaderCommitIndex,
+          static_cast<bool>(req.trigger_election_now)});
   RpcEmptyAppendEntriesResponse resp{};
-  RaftServer* svr = GetServer();
-  bool has_server = svr != nullptr;
-  bool disconnected = has_server && svr->IsDisconnected();
-  if (raft_service_server_unavailable(has_server, disconnected)) {
-    resp.followerAppendOK = raft_service_default_append_ok();
-    resp.followerCurrentTerm = raft_service_default_term();
-    resp.followerLastLogIndex = raft_service_default_last_log_index();
-    resp.followerAckType = raft_service_memory_ack_type();
-    return Result<RpcEmptyAppendEntriesResponse, rrr::i32>::Ok(resp);
-  }
-  resp.followerAckType = raft_service_memory_ack_type();
-  // OnAppendEntries uses the same fields as the non-empty variant with
-  // an empty cmd and leaderNextLogTerm == 0 (heartbeat path).
-  // followerAppendOK/Term/LastLogIndex are shared layout with the non-empty
-  // response, so we can pass pointers directly into our resp struct.
-  svr->OnAppendEntries(req.slot, req.ballot, req.leaderCurrentTerm,
-                       req.leaderSiteId, req.leaderPrevLogIndex,
-                       req.leaderPrevLogTerm, req.leaderCommitIndex,
-                       janus::Command{}, 0,
-                       &resp.followerAppendOK, &resp.followerCurrentTerm,
-                       &resp.followerLastLogIndex,
-                       req.trigger_election_now);
+  resp.followerAppendOK = reply.follower_append_ok;
+  resp.followerCurrentTerm = reply.follower_current_term;
+  resp.followerLastLogIndex = reply.follower_last_log_index;
+  resp.followerAckType = reply.follower_ack_type;
   return Result<RpcEmptyAppendEntriesResponse, rrr::i32>::Ok(resp);
 }
 
 Result<RaftService::RpcAppendEntriesDurableResponse, rrr::i32>
 RaftServiceImpl::AppendEntriesDurable(const RpcAppendEntriesDurableRequest& req) {
+  auto dispatcher = raft::make_raft_server_dispatcher(GetServer());
+  auto reply = dispatcher->handle_append_entries_durable(
+      raft::AppendEntriesDurableReq{req.term, req.follower_id, req.lastLogIndex});
   RpcAppendEntriesDurableResponse resp{};
-  RaftServer* svr = GetServer();
-  bool has_server = svr != nullptr;
-  bool disconnected = has_server && svr->IsDisconnected();
-  if (raft_service_server_unavailable(has_server, disconnected)) {
-    resp.acknowledged = raft_service_default_acknowledged();
-    return Result<RpcAppendEntriesDurableResponse, rrr::i32>::Ok(resp);
-  }
-  svr->OnAppendEntriesDurable(req.term, req.follower_id,
-                              req.lastLogIndex, &resp.acknowledged);
+  resp.acknowledged = reply.acknowledged;
   return Result<RpcAppendEntriesDurableResponse, rrr::i32>::Ok(resp);
 }
 
 Result<RaftService::RpcTimeoutNowResponse, rrr::i32>
 RaftServiceImpl::TimeoutNow(const RpcTimeoutNowRequest& req) {
+  auto dispatcher = raft::make_raft_server_dispatcher(GetServer());
+  auto reply = dispatcher->handle_timeout_now(
+      raft::TimeoutNowReq{req.leaderTerm, req.leaderSiteId});
   RpcTimeoutNowResponse resp{};
-  RaftServer* svr = GetServer();
-  bool has_server = svr != nullptr;
-  bool disconnected = has_server && svr->IsDisconnected();
-  if (raft_service_server_unavailable(has_server, disconnected)) {
-    resp.followerTerm = raft_service_default_term();
-    resp.success = raft_service_default_timeout_success();
-    return Result<RpcTimeoutNowResponse, rrr::i32>::Ok(resp);
-  }
-  svr->OnTimeoutNow(req.leaderTerm, req.leaderSiteId,
-                    &resp.followerTerm, &resp.success);
+  resp.followerTerm = reply.follower_term;
+  resp.success = reply.success;
   return Result<RpcTimeoutNowResponse, rrr::i32>::Ok(resp);
 }
 
@@ -276,44 +154,22 @@ Result<RaftService::RpcNotifyRestartResponse, rrr::i32>
 RaftServiceImpl::NotifyRestart(const RpcNotifyRestartRequest& req) {
   Log_info("[NOTIFY-RESTART] Received restart notification from site {}",
            req.restartedSiteId);
+  auto dispatcher = raft::make_raft_server_dispatcher(GetServer());
+  auto reply = dispatcher->handle_notify_restart(
+      raft::NotifyRestartReq{req.restartedSiteId});
   RpcNotifyRestartResponse resp{};
-  RaftServer* svr = GetServer();
-  bool has_server = svr != nullptr;
-  bool disconnected = has_server && svr->IsDisconnected();
-  if (raft_service_server_unavailable(has_server, disconnected)) {
-    resp.acknowledged = raft_service_default_acknowledged();
-    return Result<RpcNotifyRestartResponse, rrr::i32>::Ok(resp);
-  }
-  auto commo = svr->commo();
-  if (raft_service_should_reconnect(commo != nullptr)) {
-    bool success = commo->ReconnectToSite(req.restartedSiteId,
-                                          svr->partition_id_);
-    resp.acknowledged = raft_service_notify_ack_from_reconnect(success);
-    Log_info("[NOTIFY-RESTART] Reconnected to site {}: {}",
-             req.restartedSiteId, success ? "success" : "failed");
-  } else {
-    resp.acknowledged = raft_service_default_acknowledged();
-    Log_warn("[NOTIFY-RESTART] commo is null, cannot reconnect to site {}",
-             req.restartedSiteId);
-  }
-  // Invalidate speculative state for the peer that just restarted.
-  svr->OnPeerRestart(req.restartedSiteId);
+  resp.acknowledged = reply.acknowledged;
   return Result<RpcNotifyRestartResponse, rrr::i32>::Ok(resp);
 }
 
 Result<RaftService::RpcInstallSnapshotResponse, rrr::i32>
 RaftServiceImpl::InstallSnapshot(const RpcInstallSnapshotRequest& req) {
+  auto dispatcher = raft::make_raft_server_dispatcher(GetServer());
+  auto reply = dispatcher->handle_install_snapshot(
+      raft::InstallSnapshotReq{req.term, req.leader_id, req.last_included_index,
+                               req.last_included_term, req.data});
   RpcInstallSnapshotResponse resp{};
-  RaftServer* svr = GetServer();
-  bool has_server = svr != nullptr;
-  bool disconnected = has_server && svr->IsDisconnected();
-  if (raft_service_server_unavailable(has_server, disconnected)) {
-    resp.term_out = raft_service_default_term();
-    return Result<RpcInstallSnapshotResponse, rrr::i32>::Ok(resp);
-  }
-  svr->OnInstallSnapshot(req.term, req.leader_id,
-                         req.last_included_index, req.last_included_term,
-                         req.data, &resp.term_out);
+  resp.term_out = reply.term_out;
   return Result<RpcInstallSnapshotResponse, rrr::i32>::Ok(resp);
 }
 
