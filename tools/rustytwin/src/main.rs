@@ -43,6 +43,7 @@ fn check(args: &[String]) -> Result<u8, String> {
     let tape_path = required_option(args, "--tape")?;
     let output_dir = required_option(args, "--out")?;
     let timeout_ms = timeout_ms(args)?;
+    let operations = load_tape(&PathBuf::from(&tape_path))?;
 
     run_check(
         baseline_bin,
@@ -51,6 +52,7 @@ fn check(args: &[String]) -> Result<u8, String> {
         output_dir,
         timeout_ms,
         has_flag(args, "--show-output"),
+        operations,
         run_harness,
     )
 }
@@ -58,9 +60,9 @@ fn check(args: &[String]) -> Result<u8, String> {
 fn gtest_check(args: &[String]) -> Result<u8, String> {
     let baseline_test = required_option(args, "--baseline-test")?;
     let candidate_test = required_option(args, "--candidate-test")?;
-    let tape_path = required_option(args, "--tape")?;
     let output_dir = required_option(args, "--out")?;
     let timeout_ms = timeout_ms(args)?;
+    let (tape_path, operations) = gtest_operations(args)?;
 
     run_check(
         baseline_test,
@@ -69,6 +71,7 @@ fn gtest_check(args: &[String]) -> Result<u8, String> {
         output_dir,
         timeout_ms,
         has_flag(args, "--show-output"),
+        operations,
         run_gtest_harness,
     )
 }
@@ -80,6 +83,7 @@ fn run_check(
     output_dir: String,
     timeout_ms: u64,
     show_output: bool,
+    operations: Vec<rustytwin::protocol::Operation>,
     runner: fn(
         &std::path::Path,
         &[rustytwin::protocol::Operation],
@@ -87,7 +91,6 @@ fn run_check(
     ) -> Result<rustytwin::protocol::HarnessResult, String>,
 ) -> Result<u8, String> {
     let tape_path = PathBuf::from(tape_path);
-    let operations = load_tape(&tape_path)?;
     let config = RunnerConfig {
         timeout: Duration::from_millis(timeout_ms),
     };
@@ -119,6 +122,38 @@ fn run_check(
     )?;
     println!("\nReplay artifact:\n  {}", artifact_path.display());
     Ok(1)
+}
+
+fn gtest_operations(
+    args: &[String],
+) -> Result<(String, Vec<rustytwin::protocol::Operation>), String> {
+    let tape = optional_option(args, "--tape");
+    let filter = optional_option(args, "--filter");
+    match (tape, filter) {
+        (Some(_), Some(_)) => {
+            Err("gtest-check accepts either --tape or --filter, not both".to_owned())
+        }
+        (Some(tape), None) => Ok((tape.to_owned(), load_tape(&PathBuf::from(tape))?)),
+        (None, Some(filter)) if filter.is_empty() => Err("--filter must not be empty".to_owned()),
+        (None, Some(filter)) => Ok((
+            format!("<generated GoogleTest filter: {filter}>"),
+            vec![rustytwin::protocol::Operation {
+                kind: "operation".to_owned(),
+                step: 1,
+                op: "run_gtest".to_owned(),
+                args: serde_json::json!({"gtest_filter": filter}),
+            }],
+        )),
+        (None, None) => Ok((
+            "<generated full GoogleTest suite>".to_owned(),
+            vec![rustytwin::protocol::Operation {
+                kind: "operation".to_owned(),
+                step: 1,
+                op: "run_gtest".to_owned(),
+                args: serde_json::json!({}),
+            }],
+        )),
+    }
 }
 
 fn print_captured_output(label: &str, result: &rustytwin::protocol::HarnessResult) {
@@ -180,7 +215,7 @@ fn has_flag(args: &[String], flag: &str) -> bool {
 }
 
 fn usage() -> String {
-    "Usage:\n  rustytwin check --baseline-bin <path> --candidate-bin <path> --tape <path> --out <dir> [--timeout-ms <ms>] [--show-output]\n  rustytwin gtest-check --baseline-test <path> --candidate-test <path> --tape <path> --out <dir> [--timeout-ms <ms>] [--show-output]\n  rustytwin replay <artifact>".to_owned()
+    "Usage:\n  rustytwin check --baseline-bin <path> --candidate-bin <path> --tape <path> --out <dir> [--timeout-ms <ms>] [--show-output]\n  rustytwin gtest-check --baseline-test <path> --candidate-test <path> --out <dir> [--filter <gtest-filter> | --tape <path>] [--timeout-ms <ms>] [--show-output]\n  rustytwin replay <artifact>".to_owned()
 }
 
 #[cfg(test)]
@@ -205,5 +240,27 @@ mod tests {
     #[test]
     fn recognizes_show_output_flag() {
         assert!(has_flag(&["--show-output".to_owned()], "--show-output"));
+    }
+
+    #[test]
+    fn gtest_filter_creates_a_single_operation() {
+        let args = vec!["--filter".to_owned(), "Suite.Case".to_owned()];
+        let (source, operations) = gtest_operations(&args).unwrap();
+
+        assert!(source.contains("Suite.Case"));
+        assert_eq!(operations.len(), 1);
+        assert_eq!(operations[0].args["gtest_filter"], "Suite.Case");
+    }
+
+    #[test]
+    fn gtest_filter_and_tape_are_mutually_exclusive() {
+        let args = vec![
+            "--filter".to_owned(),
+            "Suite.Case".to_owned(),
+            "--tape".to_owned(),
+            "tape.ndjson".to_owned(),
+        ];
+
+        assert!(gtest_operations(&args).unwrap_err().contains("not both"));
     }
 }

@@ -149,6 +149,29 @@ fn gtest_check_compares_passing_test_binaries() {
 }
 
 #[test]
+fn gtest_check_can_run_a_filter_without_a_tape() {
+    let output_dir = output_dir("gtest-filter");
+    let _ = fs::remove_dir_all(&output_dir);
+    let output = Command::new(env!("CARGO_BIN_EXE_rustytwin"))
+        .args([
+            "gtest-check",
+            "--baseline-test",
+            gtest_fixture("passing").to_str().unwrap(),
+            "--candidate-test",
+            gtest_fixture("passing").to_str().unwrap(),
+            "--filter",
+            "SampleSuite.Passes",
+            "--out",
+            output_dir.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{}", stdout(&output));
+    assert!(stdout(&output).contains("Behavioral migration check: PASSED"));
+}
+
+#[test]
 fn gtest_check_writes_an_artifact_when_a_test_binary_fails() {
     let output_dir = output_dir("gtest-failing");
     let output = run_gtest_check("passing", "failing", &output_dir);

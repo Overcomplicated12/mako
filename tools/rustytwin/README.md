@@ -74,14 +74,12 @@ build22-wrapper/test_raft_quorum --gtest_color=no
 Then use the built-in GoogleTest adapter. Using the same test binary on both
 sides is an identity smoke check: it verifies RustyTwin's process, timeout,
 output-capture, and comparison paths against the real Raft test suite.
-Each tape operation invokes the test binary once; add a string
-`args.gtest_filter` to run a focused GoogleTest filter for that operation.
 
 ```bash
 cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- gtest-check \
   --baseline-test "$PWD/build22-wrapper/test_raft_quorum" \
   --candidate-test "$PWD/build22-wrapper/test_raft_quorum" \
-  --tape tools/rustytwin/examples/raft_quorum_smoke.ndjson \
+  --filter RaftQuorumTest.HelperPredicates \
   --out /tmp/rustytwin-raft-quorum \
   --timeout-ms 5000 \
   --show-output
@@ -90,6 +88,11 @@ cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- gtest-check \
 `--show-output` prints the captured baseline and candidate diagnostics to the
 console. Omit it for the normal concise result; output remains available in a
 failure replay artifact either way.
+
+`gtest-check` does not require an NDJSON tape for a single test: `--filter`
+creates one operation internally. Omit both `--filter` and `--tape` to run the
+full test binary once. Use `--tape` only for an ordered sequence of filters or
+scenarios; it cannot be combined with `--filter`.
 
 For a migration-equivalence check, build separate pre-migration and migrated
 Raft test targets and pass their paths as `--baseline-test` and
@@ -108,10 +111,12 @@ is trustworthy.
 2. Choose a narrow behavior boundary: a pure helper, value type, codec, or
    focused test target. Avoid cluster timing, real network I/O, filesystem
    persistence, and broad server lifecycle behavior in the first tape.
-3. Define one NDJSON operation for each observable behavior. Give every
-   operation a stable `step`, name, and JSON arguments. A harness should emit
-   exactly one event for each operation, including the return value or a small
-   state summary needed for comparison.
+3. Use `gtest-check --filter Suite.Test` for one focused GoogleTest case; it
+   creates the operation internally. Define NDJSON operations only for custom
+   harnesses or ordered multi-test scenarios. Give every operation a stable
+   `step`, name, and JSON arguments. A harness should emit exactly one event
+   for each operation, including the return value or a small state summary
+   needed for comparison.
 4. Use `gtest-check` when a focused GoogleTest binary provides the boundary.
    For other module boundaries, write a thin executable harness per
    implementation. It reads NDJSON from standard input, calls the module
@@ -144,11 +149,14 @@ For a focused GoogleTest target, use the shorter built-in form instead:
 cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- gtest-check \
   --baseline-test /absolute/path/to/baseline-test \
   --candidate-test /absolute/path/to/candidate-test \
-  --tape /absolute/path/to/gtest-operations.ndjson \
+  --filter Suite.Test \
   --out /tmp/rustytwin-module-check \
   --timeout-ms 5000 \
   --show-output
 ```
+
+Replace `--filter Suite.Test` with `--tape /path/to/gtest-operations.ndjson`
+to run several GoogleTest filters in a defined order.
 
 8. Treat a nonzero exit as a failed comparison. Inspect and share the saved
    artifact before changing either implementation:
