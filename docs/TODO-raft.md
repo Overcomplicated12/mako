@@ -603,6 +603,14 @@ and returns the filled `Reply`.
   `test_raft_*`. Currently blocked by pre-existing `src/deptran/raft/test.cc`
   compile failures (the `Init` macro collision and stale `current_config_` /
   `learners_` test references), which are pulled in by `txlog_core_obj`.
+- [x] Edge coverage that does not require a live `RaftServer`: the null-server
+  dispatcher test exercises every reply shape, while
+  `test_raft_channel_transport` drops the direction for every reply-bearing
+  transport RPC (`Vote`, `AppendEntries`, `EmptyAppendEntries`, `TimeoutNow`,
+  `InstallSnapshot`) and verifies default replies plus successful recovery.
+  The same test covers fire-and-forget `VoteDurable`,
+  `AppendEntriesDurable`, and `NotifyRestart`: a dropped direction delivers
+  none, then fault reset delivers each exactly once.
 - [ ] **Commit**: `raft: phase 8.2 — RaftServerDispatcher + factory`.
 
 ### 8.2 risks
@@ -636,6 +644,19 @@ the corresponding dispatcher `handle_x(req)`.
 - [ ] Gate: lab test tests 1-60 all pass. Pay attention to
   `NotifyRestart` — it has side effects (calls `commo->ReconnectToSite`
   + `svr->OnPeerRestart`).
+- [ ] Add live-server edge tests once `test_raft_server_dispatcher` can link:
+  `NotifyRestart` with reconnect success, failure, and null `commo()` (and in
+  all non-disconnected cases assert `OnPeerRestart` invalidates speculative
+  state); `EmptyAppendEntries` with both trigger-election values; stale-term
+  and conflicting-prefix `AppendEntries`; stale/equal-index
+  `InstallSnapshot`; and `TimeoutNow` rejection without an election. These
+  need a real test server because the adapter deliberately calls non-virtual
+  `RaftServer::OnX` methods.
+- [ ] Add a Kill/Restart-in-flight lab case: publish `nullptr` via
+  `UpdateServer()` while an RPC is pending, then install a replacement and
+  verify no request uses a cached dispatcher/server pointer. The current
+  short-lived dispatcher design is intended to make this safe, but it needs
+  the full harness to validate the lifetime race.
 - [ ] **Commit**: `raft: phase 8.3 — RaftServiceImpl forwards to
   DispatcherProxy`.
 
