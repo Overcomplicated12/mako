@@ -1,0 +1,13 @@
+# Reserved for RustyTwin sequence generation after v0. The fixture tape stays
+# deliberately small and deterministic while the process runner is proven.
+operations:
+  - majority_count
+  - is_memory_ack
+  - snapshot_supports_compression
+  - command_payload_present
+  - command_kind_is
+  - recovery_cleanup_predicate
+
+ranges:
+  replicas: [1, 7]
+  log_index: [0, 30]

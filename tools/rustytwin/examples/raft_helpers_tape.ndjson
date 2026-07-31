@@ -1,0 +1,6 @@
+{"kind":"operation","step":1,"op":"majority_count","args":{"replicas":5}}
+{"kind":"operation","step":2,"op":"is_memory_ack","args":{"ack_type":"memory"}}
+{"kind":"operation","step":3,"op":"snapshot_supports_compression","args":{"compression":"none"}}
+{"kind":"operation","step":4,"op":"command_payload_present","args":{"present":true}}
+{"kind":"operation","step":5,"op":"command_kind_is","args":{"kind":"commit","expected_kind":"commit"}}
+{"kind":"operation","step":6,"op":"recovery_cleanup_predicate","args":{"log_index":12,"commit_index":9}}

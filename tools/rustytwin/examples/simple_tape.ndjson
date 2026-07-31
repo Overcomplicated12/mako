@@ -1,0 +1,3 @@
+{"kind":"operation","step":1,"op":"majority_count","args":{"replicas":5}}
+{"kind":"operation","step":2,"op":"is_memory_ack","args":{"ack_type":"memory"}}
+{"kind":"operation","step":3,"op":"snapshot_supports_compression","args":{"compression":"none"}}

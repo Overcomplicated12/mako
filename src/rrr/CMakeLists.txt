@@ -102,6 +102,11 @@ endif()
 
 if(NOT TARGET rrr)
     add_library(rrr STATIC ${RRR_BENCH_SRC})
+    # RRR's named module interface units import `std` directly. Set this on
+    # the target explicitly so CMake wires its generated libc++ std.pcm into
+    # RRR's module dependency graph.
+    target_compile_features(rrr PUBLIC cxx_std_23)
+    set_property(TARGET rrr PROPERTY CXX_MODULE_STD ON)
     if(RRR_MODULE_SRC)
         target_sources(rrr PUBLIC
             FILE_SET rrr_modules TYPE CXX_MODULES FILES ${RRR_MODULE_SRC}
