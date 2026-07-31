@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import importlib.util
+import json
 import subprocess
 import sys
 import tempfile
@@ -130,6 +131,24 @@ struct Outer {
 
             self.assertEqual(set(by_name), {"Alias", "Counter", "Outer"})
             self.assertEqual(by_name["Outer"].loc, 4)
+
+    def test_cli_writes_versioned_deterministic_json(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source"
+            source.mkdir()
+            (source / "sample.hpp").write_text("enum Mode { READY };\n", encoding="utf-8")
+            summary, csv_path = root / "inventory.md", root / "inventory.csv"
+            first, second = root / "first.json", root / "second.json"
+            command = [
+                sys.executable,
+                str(SCRIPT),
+                "--source-dir", str(source), "--summary", str(summary), "--csv", str(csv_path),
+            ]
+            self.assertEqual(subprocess.run(command + ["--json", str(first)], check=False).returncode, 0)
+            self.assertEqual(subprocess.run(command + ["--json", str(second)], check=False).returncode, 0)
+            self.assertEqual(first.read_bytes(), second.read_bytes())
+            self.assertEqual(json.loads(first.read_text(encoding="utf-8"))["schema_version"], 1)
 
 
 if __name__ == "__main__":

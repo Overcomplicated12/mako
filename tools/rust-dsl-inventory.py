@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import re
 from collections import Counter
 from dataclasses import dataclass
@@ -535,11 +536,42 @@ def write_markdown(rows: list[Declaration], path: Path, csv_path: Path, source_d
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
+def write_json(rows: list[Declaration], path: Path) -> None:
+    """Write a versioned, deterministic machine-readable inventory."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": 1,
+        "declarations": [
+            {
+                "file": row.file,
+                "line": row.line,
+                "end_line": row.end_line,
+                "loc": row.loc,
+                "kind": row.kind,
+                "name": row.name,
+                "bucket": row.bucket,
+                "status": row.status,
+                "blockers": row.blockers,
+                "signals": row.signals,
+                "risk_score": row.risk_score,
+                "risk": row.risk,
+                "action": row.action,
+                "phase": row.phase,
+                "priority": row.priority,
+                "rust_blocks": row.rust_blocks,
+            }
+            for row in rows
+        ],
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source-dir", type=Path, required=True)
     parser.add_argument("--summary", type=Path, required=True)
     parser.add_argument("--csv", type=Path, required=True)
+    parser.add_argument("--json", type=Path, help="optional versioned JSON inventory")
     args = parser.parse_args()
     source_dir = args.source_dir.resolve()
     if not source_dir.is_dir():
@@ -547,8 +579,12 @@ def main() -> None:
     rows = scan(source_dir)
     write_csv(rows, args.csv)
     write_markdown(rows, args.summary, args.csv, args.source_dir)
+    if args.json:
+        write_json(rows, args.json)
     print(f"wrote {args.summary}")
     print(f"wrote {args.csv}")
+    if args.json:
+        print(f"wrote {args.json}")
     print(f"scanned {len(rows)} declarations")
 
 
