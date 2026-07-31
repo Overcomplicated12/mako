@@ -1,29 +1,27 @@
 # RustyTwin
 
-RustyTwin is a small differential test runner for RustyCpp migrations. It
-runs the same NDJSON operation tape through a baseline harness and a candidate
-harness, then compares their ordered output events.
+RustyTwin compares a baseline implementation with a RustyCpp-migrated
+candidate. It runs the same focused check on both sides, compares the observed
+result, and saves a replay artifact when they diverge.
 
-Version 0 deliberately proves the workflow with small process fixtures. It
-does not yet build revisions, inspect ABI, parse Clang ASTs, generate
-operations, shrink failures, or run a full Mako Raft cluster.
+It is designed for small, deterministic migration boundaries: a focused
+GoogleTest target, helper, value type, or codec. It does not replace Mako's
+C++ build configuration; Mako targets continue to use the configured C++23,
+Clang 22, and CMake toolchain.
 
-## Requirements
+## Quick Start
 
-- Rust and Cargo. The repository currently validates this tool with Rust
-  1.91.
-- Python 3 for the included fixture harnesses.
+Run these commands from the Mako repository root.
 
-RustyTwin does not compile C++ in v0. Future Mako adapters must be built using
-Mako's configured C++23 and Clang 22.x CMake toolchain; this tool must not
-invent a separate compiler configuration.
+Build and test RustyTwin:
 
-## Fast Module Workflow
+```bash
+cargo build --locked --manifest-path tools/rustytwin/Cargo.toml
+cargo test --locked --manifest-path tools/rustytwin/Cargo.toml
+```
 
-For a focused GoogleTest-backed migration, create a small module manifest once
-and then point RustyTwin at build directories instead of individual binaries.
-The manifest records the target name and default filter; it can hold build
-directories too, although command-line directories take precedence.
+Create a manifest for a focused GoogleTest target. This records the test name,
+default filter, timeout, and the two build directories.
 
 ```bash
 cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- init \
@@ -35,42 +33,60 @@ cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- init \
   --timeout-ms 5000
 ```
 
-Run `doctor` before a comparison. It checks that Clang 22 and CMake are
-available, validates the manifest, finds both test targets, and warns when
-both sides resolve to the same build directory.
+Validate the environment and both configured targets:
 
 ```bash
 cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- doctor \
   --module tools/rustytwin/modules/raft-quorum.toml
 ```
 
-Then run the comparison with the short module form:
+Build each target and compare them:
 
 ```bash
 cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- check \
-  --module tools/rustytwin/modules/raft-quorum.toml \
+  tools/rustytwin/modules/raft-quorum.toml \
   --build \
   --out /tmp/rustytwin-raft-quorum \
   --show-output
 ```
 
-`--build` runs `cmake --build <build-dir> --target <test-target>` for each
-side before launching the check. RustyTwin stops at the first failed build and
-prints the tail of that side's CMake diagnostics. When both sides use the same
-build directory, it builds once and labels the result as an identity smoke
-check.
+`--build` runs `cmake --build <build-dir> --target <test-target>` before the
+comparison. A failed build stops the command and prints the relevant CMake
+diagnostics. When both sides use the same build directory, RustyTwin builds it
+once and reports an identity smoke check.
 
-You can override either configured build directory without editing TOML:
+## Everyday Commands
+
+| Command | Use |
+| --- | --- |
+| `init` | Create a GoogleTest module manifest. |
+| `doctor` | Check the manifest, Clang 22, CMake, build directories, and test targets. |
+| `check --module` | Build optionally, run the two tests, and compare results. |
+| `replay` | Read a saved divergence artifact. |
+
+Override a manifest setting without editing it:
 
 ```bash
 cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- check \
   tools/rustytwin/modules/raft-quorum.toml \
   --baseline-build "$PWD/build22-baseline" \
   --candidate-build /tmp/mako-raft-sabotage/build22-candidate \
+  --filter RaftQuorumTest.HelperPredicates \
   --out /tmp/rustytwin-raft-quorum
 ```
 
-`init` writes this ordinary TOML file:
+A successful comparison exits `0`. A behavioral mismatch exits `1` and prints
+the artifact path. Replay it with:
+
+```bash
+cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- replay \
+  /tmp/rustytwin-raft-quorum/rustytwin-failure-0001.json
+```
+
+## Module Manifest
+
+`init` writes ordinary TOML. The only adapter currently supported by manifests
+is `gtest`.
 
 ```toml
 [module]
@@ -86,163 +102,42 @@ build_dir = "/absolute/path/to/build22-baseline"
 build_dir = "/absolute/path/to/build22-candidate"
 ```
 
-## Build And Test
+`test_target` is the CMake target and executable name below each build
+directory. `filter` is optional; without it RustyTwin runs the full GoogleTest
+binary once. `doctor` warns when the two build directories are the same: that
+proves the RustyTwin wiring works, but not migration equivalence.
 
-From the repository root:
+## GoogleTest Checks
 
-```bash
-cargo build --manifest-path tools/rustytwin/Cargo.toml
-cargo test --manifest-path tools/rustytwin/Cargo.toml
-```
-
-## Try The Fixtures
-
-An equivalent pair passes even though each side reports a different elapsed
-time. Elapsed metadata is intentionally ignored by v0 canonicalization.
-
-```bash
-cargo run --manifest-path tools/rustytwin/Cargo.toml -- check \
-  --baseline-bin tools/rustytwin/fixtures/equivalent/baseline.sh \
-  --candidate-bin tools/rustytwin/fixtures/equivalent/candidate.sh \
-  --tape tools/rustytwin/examples/simple_tape.ndjson \
-  --out /tmp/rustytwin-equivalent
-```
-
-The return-mismatch fixture exits with code `1` and saves a replay artifact:
-
-```bash
-cargo run --manifest-path tools/rustytwin/Cargo.toml -- check \
-  --baseline-bin tools/rustytwin/fixtures/return_mismatch/baseline.sh \
-  --candidate-bin tools/rustytwin/fixtures/return_mismatch/candidate.sh \
-  --tape tools/rustytwin/examples/simple_tape.ndjson \
-  --out /tmp/rustytwin-return-mismatch
-
-cargo run --manifest-path tools/rustytwin/Cargo.toml -- replay \
-  /tmp/rustytwin-return-mismatch/rustytwin-failure-0001.json
-```
-
-The `state_mismatch`, `crash_mismatch`, and `timeout_mismatch` fixture
-directories exercise the remaining v0 failure paths. Pass a short
-`--timeout-ms` value for the timeout fixture.
-
-## Raft Quorum Smoke Check
-
-RustyTwin can wrap the focused Raft quorum test target as a small integration
-smoke check. This uses real code from `src/deptran/raft/quorum.hpp`, including
-the inline-Rust DSL-backed helper predicates.
-
-First build and run the existing target from a configured Mako Clang 22 build
-directory. Substitute your own build directory when it differs:
-
-```bash
-cmake --build build22-wrapper --target test_raft_quorum -j2
-build22-wrapper/test_raft_quorum --gtest_color=no
-```
-
-Then use the built-in GoogleTest adapter. Using the same test binary on both
-sides is an identity smoke check: it verifies RustyTwin's process, timeout,
-output-capture, and comparison paths against the real Raft test suite.
+The module workflow is the preferred route for repeatable Mako checks. For a
+one-off focused test, use the direct adapter instead:
 
 ```bash
 cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- gtest-check \
-  --baseline-test "$PWD/build22-wrapper/test_raft_quorum" \
-  --candidate-test "$PWD/build22-wrapper/test_raft_quorum" \
+  --baseline-test /path/to/baseline/test_raft_quorum \
+  --candidate-test /path/to/candidate/test_raft_quorum \
   --filter RaftQuorumTest.HelperPredicates \
-  --out /tmp/rustytwin-raft-quorum \
-  --timeout-ms 5000 \
-  --show-output
+  --out /tmp/rustytwin-raft-quorum
 ```
 
-`--show-output` prints the captured baseline and candidate diagnostics to the
-console. Omit it for the normal concise result; output remains available in a
-failure replay artifact either way.
+Use `--show-output` when you want the captured GoogleTest diagnostics in the
+console. Omit both `--filter` and `--tape` to run the full test binary once.
+Use `--tape` only for an ordered sequence of GoogleTest filters; it cannot be
+combined with `--filter`.
 
-`gtest-check` does not require an NDJSON tape for a single test: `--filter`
-creates one operation internally. Omit both `--filter` and `--tape` to run the
-full test binary once. Use `--tape` only for an ordered sequence of filters or
-scenarios; it cannot be combined with `--filter`.
+## Custom Harnesses And NDJSON
 
-For a migration-equivalence check, build separate pre-migration and migrated
-Raft test targets and pass their paths as `--baseline-test` and
-`--candidate-test`. The identity smoke check cannot establish equivalence by
-itself.
-
-## Module Test Process
-
-Use this process when bringing any Mako module under RustyTwin. Keep the first
-operation tape small and deterministic; grow it only after the basic boundary
-is trustworthy.
-
-1. Build and run the module's normal focused test target first. Use Mako's
-   configured C++23 and Clang 22 toolchain, and fix ordinary test failures
-   before involving RustyTwin.
-2. Choose a narrow behavior boundary: a pure helper, value type, codec, or
-   focused test target. Avoid cluster timing, real network I/O, filesystem
-   persistence, and broad server lifecycle behavior in the first tape.
-3. Use `gtest-check --filter Suite.Test` for one focused GoogleTest case; it
-   creates the operation internally. Define NDJSON operations only for custom
-   harnesses or ordered multi-test scenarios. Give every operation a stable
-   `step`, name, and JSON arguments. A harness should emit exactly one event
-   for each operation, including the return value or a small state summary
-   needed for comparison.
-4. Use `gtest-check` when a focused GoogleTest binary provides the boundary.
-   For other module boundaries, write a thin executable harness per
-   implementation. It reads NDJSON from standard input, calls the module
-   boundary, and writes NDJSON only to standard output. Send logs and
-   diagnostics to standard error. Keep harness policy out of the module
-   itself.
-5. Start with an identity smoke check when only one build exists. Run the same
-   harness on both sides to validate process launching, input handling,
-   timeout behavior, and event parsing. Record it as a smoke check, not as
-   migration evidence.
-6. For an equivalence check, build the baseline and DSL-migrated versions
-   separately with the same compiler family, build options, and relevant
-   configuration. `gtest-check` accepts both test paths directly; custom
-   harnesses use two wrapper executables so each child process selects the
-   correct binary without relying on shared environment state.
-7. Run the differential check and preserve the output directory:
+For behavior that a focused GoogleTest cannot express, use the generic `check`
+command with a small executable harness per implementation:
 
 ```bash
 cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- check \
-  --baseline-bin /absolute/path/to/baseline-harness \
-  --candidate-bin /absolute/path/to/candidate-harness \
-  --tape /absolute/path/to/module-operations.ndjson \
+  --baseline-bin /path/to/baseline-harness \
+  --candidate-bin /path/to/candidate-harness \
+  --tape /path/to/module-operations.ndjson \
   --out /tmp/rustytwin-module-check \
   --timeout-ms 5000
 ```
-
-For a focused GoogleTest target, use the shorter built-in form instead:
-
-```bash
-cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- gtest-check \
-  --baseline-test /absolute/path/to/baseline-test \
-  --candidate-test /absolute/path/to/candidate-test \
-  --filter Suite.Test \
-  --out /tmp/rustytwin-module-check \
-  --timeout-ms 5000 \
-  --show-output
-```
-
-Replace `--filter Suite.Test` with `--tape /path/to/gtest-operations.ndjson`
-to run several GoogleTest filters in a defined order.
-
-8. Treat a nonzero exit as a failed comparison. Inspect and share the saved
-   artifact before changing either implementation:
-
-```bash
-cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- replay \
-  /tmp/rustytwin-module-check/rustytwin-failure-0001.json
-```
-
-9. Add regression coverage when the tape exposes a meaningful behavior. Keep
-   fast identity smoke checks near the module adapter, and reserve broader
-   integration scenarios for a later, explicitly deterministic test layer.
-
-Current canonicalization ignores only elapsed-time-style metadata. Harnesses
-should avoid emitting addresses, wall-clock values, random IDs, unordered
-collections, or verbose framework output on standard output.
-
-## Protocol
 
 RustyTwin writes one operation per line to both harnesses:
 
@@ -250,30 +145,53 @@ RustyTwin writes one operation per line to both harnesses:
 {"kind":"operation","step":1,"op":"majority_count","args":{"replicas":5}}
 ```
 
-Each harness writes one observable event per line:
+Each harness writes one observable event per line to standard output:
 
 ```json
 {"kind":"event","step":1,"event":"return","value":3}
 ```
 
-The MVP compares JSON structurally, preserves event order, ignores elapsed
-time metadata, normalizes trailing standard-output whitespace, and treats a
-candidate-only crash or timeout as a divergence.
+Put logs and framework diagnostics on standard error. RustyTwin compares event
+order and JSON structure, normalizes trailing output whitespace, and ignores
+elapsed-time metadata. Avoid addresses, wall-clock values, random IDs, and
+unordered collections in observable events.
 
-## Files
+## Bringing Up A Module
 
-- `src/protocol.rs`: typed NDJSON and replay-artifact structures.
-- `src/runner.rs`: sequential process execution, timeouts, and output capture.
-- `src/compare.rs`: canonical trace comparison.
-- `src/replay.rs`: failure artifact persistence and loading.
-- `src/report.rs`: terminal reports.
-- `examples/raft_helpers_tape.ndjson`: a Mako-aware future adapter tape.
+1. Start with a narrow, deterministic behavior boundary and a normal focused
+   test that already passes on each build.
+2. Begin with an identity smoke check if only one build exists. Record it as a
+   wiring check, not migration evidence.
+3. Build the baseline and candidate with the same compiler family, build
+   options, and relevant runtime configuration.
+4. Run `doctor`, then `check --build`; inspect the replay artifact before
+   changing either implementation after a mismatch.
+5. Add a regression test or operation whenever the comparison catches a
+   meaningful behavior difference. Leave cluster timing, real network I/O,
+   filesystem persistence, and broad lifecycle scenarios for a later,
+   explicitly deterministic layer.
 
-## Future Work
+## Fixtures
 
-- Stateful operation generation and shrinking.
-- A small real Mako Raft helper adapter.
-- Full RaftServer and deterministic cluster coverage.
-- ABI manifests and RustyCpp marker checks.
-- Clang AST migration rules.
-- HTML reports and CI integration.
+The fixture suite is useful for trying the generic harness protocol without a
+Mako build:
+
+```bash
+cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- check \
+  --baseline-bin tools/rustytwin/fixtures/equivalent/baseline.sh \
+  --candidate-bin tools/rustytwin/fixtures/equivalent/candidate.sh \
+  --tape tools/rustytwin/examples/simple_tape.ndjson \
+  --out /tmp/rustytwin-equivalent
+```
+
+`fixtures/return_mismatch`, `state_mismatch`, `crash_mismatch`, and
+`timeout_mismatch` demonstrate the recorded failure modes. The fixtures need
+Python 3; RustyTwin itself needs Rust and Cargo.
+
+## Scope
+
+RustyTwin currently compares process-observable behavior. It does not yet
+build revisions automatically from source, inspect ABI, parse Clang ASTs,
+generate or shrink operations, or run a full Mako Raft cluster. Planned work
+includes named module cases, stateful operation generation, migration rules,
+CI reports, and deterministic Raft-server coverage.
