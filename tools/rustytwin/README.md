@@ -110,6 +110,26 @@ cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- replay \
   /tmp/rustytwin-raft-quorum/rustytwin-failure-0001.json
 ```
 
+## Exit Codes
+
+| Code | Meaning | Typical response |
+| --- | --- | --- |
+| `0` | The requested command completed successfully; a check matched or `doctor` found no blocking issue. | Continue with the migration or CI job. |
+| `1` | A behavioral check diverged, or `doctor` found an invalid configured build or target. | Inspect the report or artifact, then fix the named side. |
+| `2` | RustyTwin could not interpret the command, manifest, tape, executable, or build command. | Correct the input or environment error printed on standard error. |
+
+## Failure Guide
+
+| Symptom | What it means | First command to run |
+| --- | --- | --- |
+| Build failure | `--build` could not produce the configured CMake target. | `cmake --build <build-dir> --target <test-target>` |
+| Timeout | One harness did not finish before `timeout_ms`. | Run the failing binary directly with its gtest filter, then increase the timeout only when the behavior is expected. |
+| Exit-status mismatch | One side passed while the other failed or crashed. | Run both test binaries directly with the same `--gtest_filter`. |
+| Event mismatch | Custom harnesses emitted different structured events. | `rustytwin replay <artifact>` and compare each harness's NDJSON output for the reported step. |
+
+`--show-output` prints the captured diagnostics during a check. The replay
+artifact preserves both captures even when that flag is omitted.
+
 ## Module Manifest
 
 `init` writes ordinary TOML. The only adapter currently supported by manifests
@@ -183,6 +203,31 @@ order and JSON structure, normalizes trailing output whitespace, and ignores
 elapsed-time metadata. Avoid addresses, wall-clock values, random IDs, and
 unordered collections in observable events.
 
+## Examples
+
+The short Raft check above is the primary README example. Longer walkthroughs
+live in [examples/README.md](examples/README.md):
+
+- [RRR transport identity check](examples/rrr-transport.md)
+- [Raft quorum sabotage demonstration](examples/raft-quorum-sabotage.md)
+- [Custom NDJSON harness](examples/custom-ndjson.md)
+
+The existing `*.ndjson` files in that directory are ready-to-parse operation
+tapes used by the fixtures and future module adapters.
+
+## Glossary
+
+| Term | Meaning |
+| --- | --- |
+| Baseline | The known-good implementation or build used as the reference. |
+| Candidate | The migrated implementation or build being compared with the baseline. |
+| Identity smoke check | Runs the same build on both sides to validate RustyTwin wiring; it is not migration evidence. |
+| Equivalence check | Runs separate baseline and migrated builds to test observable behavioral agreement. |
+| Adapter | The bridge from a test style to RustyTwin events; currently generic harness and GoogleTest adapters exist. |
+| Harness | A small executable that receives operations and emits observable events for a custom check. |
+| Tape | An NDJSON sequence of ordered operations passed to a custom harness or interpreted by an adapter. |
+| Replay artifact | JSON evidence saved for a failed check, including inputs, captures, and the first divergence. |
+
 ## Bringing Up A Module
 
 1. Start with a narrow, deterministic behavior boundary and a normal focused
@@ -214,6 +259,22 @@ cargo run --locked --manifest-path tools/rustytwin/Cargo.toml -- check \
 `fixtures/return_mismatch`, `state_mismatch`, `crash_mismatch`, and
 `timeout_mismatch` demonstrate the recorded failure modes. The fixtures need
 Python 3; RustyTwin itself needs Rust and Cargo.
+
+## Command Reference
+
+`rustytwin --help` is the authoritative command reference. The block below is
+kept in sync with the CLI by `tests/documentation.rs`.
+
+```text
+Usage:
+  rustytwin init --module <path> --test-target <target> [--baseline-build <dir>] [--candidate-build <dir>] [--filter <gtest-filter>] [--timeout-ms <ms>]
+  rustytwin doctor --module <path> [--baseline-build <dir>] [--candidate-build <dir>]
+  rustytwin check --module <path> --out <dir> [--build] [--baseline-build <dir>] [--candidate-build <dir>] [--filter <gtest-filter>] [--timeout-ms <ms>] [--show-output]
+  rustytwin check <module-path> --out <dir> [module check options]
+  rustytwin check --baseline-bin <path> --candidate-bin <path> --tape <path> --out <dir> [--timeout-ms <ms>] [--show-output]
+  rustytwin gtest-check --baseline-test <path> --candidate-test <path> --out <dir> [--filter <gtest-filter> | --tape <path>] [--timeout-ms <ms>] [--show-output]
+  rustytwin replay <artifact>
+```
 
 ## Scope
 
