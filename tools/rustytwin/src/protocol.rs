@@ -1,8 +1,16 @@
+//! The serializable boundary between RustyTwin and custom harnesses.
+//!
+//! Custom harnesses receive [`Operation`] values as NDJSON on standard input
+//! and emit [`HarnessEvent`] values as NDJSON on standard output. The same
+//! types are saved in replay artifacts, so additions must remain compatible
+//! with previously written data.
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+/// Version of the replay-artifact and harness-operation data contract.
 pub const PROTOCOL_VERSION: u32 = 1;
 
 fn operation_kind() -> String {
@@ -17,7 +25,10 @@ fn empty_object() -> Value {
     Value::Object(Map::new())
 }
 
-/// One operation delivered to both harnesses through their standard input.
+/// One operation delivered to both custom harnesses through standard input.
+///
+/// `step` establishes comparison order; `op` and `args` are owned by the
+/// harness adapter rather than interpreted by the generic runner.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Operation {
     #[serde(default = "operation_kind")]
@@ -29,6 +40,9 @@ pub struct Operation {
 }
 
 /// One observable output event written by a harness as an NDJSON line.
+///
+/// Adapter-specific event payload fields are flattened into `fields`, which
+/// keeps the protocol extensible without making the runner adapter-aware.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct HarnessEvent {
     #[serde(default = "event_kind")]
@@ -48,6 +62,9 @@ pub struct ExitStatusInfo {
 }
 
 /// Complete captured result from one harness execution.
+///
+/// Standard output is parsed as events for custom harnesses. Standard error is
+/// retained as diagnostics and never participates in event comparison.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct HarnessResult {
     pub events: Vec<HarnessEvent>,
@@ -93,7 +110,8 @@ pub struct FailureReport {
     pub divergence: Divergence,
 }
 
-/// Inputs that describe one `rustytwin check` invocation.
+/// Inputs that describe one `rustytwin check` invocation and are retained for
+/// replay context.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct CheckMetadata {
     pub baseline_bin: String,

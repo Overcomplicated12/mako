@@ -1,11 +1,22 @@
+//! Trace comparison and canonicalization.
+//!
+//! RustyTwin reports the earliest meaningful difference first. Process-level
+//! failures take priority over event differences because an event trace is not
+//! comparable when one side timed out, crashed, or emitted invalid NDJSON.
+
 use serde_json::{to_value, Value};
 
 use crate::protocol::{Comparison, Divergence, DivergenceKind, HarnessEvent, HarnessResult};
 
+// Timing is diagnostic data rather than migration behavior. Keep this list
+// intentionally small so the comparator does not hide real state changes.
 const IGNORED_METADATA_FIELDS: &[&str] = &["elapsed", "elapsed_ms", "time", "timestamp"];
 
-/// Compare two captured harness runs in the order users experience failures:
-/// timeouts, process status, malformed output, event count, then event data.
+/// Compare two captured harness runs in failure-precedence order.
+///
+/// The comparison checks timeouts, process status, malformed output, event
+/// count, and finally canonicalized event data. Only elapsed-time-style
+/// metadata is ignored during canonicalization.
 pub fn compare_results(baseline: &HarnessResult, candidate: &HarnessResult) -> Comparison {
     if baseline.timed_out != candidate.timed_out {
         return failed(

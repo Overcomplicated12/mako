@@ -1,3 +1,9 @@
+//! Persistent failure artifacts.
+//!
+//! Artifacts capture the comparison inputs and both observed results. Replay
+//! currently renders that saved record; it intentionally does not re-run the
+//! original binaries, which may no longer exist or behave deterministically.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -8,6 +14,10 @@ use crate::protocol::{
 };
 use crate::VERSION;
 
+/// Save a self-contained artifact for a failed comparison.
+///
+/// Artifact names are allocated monotonically within `output_dir` so repeated
+/// failures do not overwrite prior evidence.
 pub fn save_failure(
     output_dir: &Path,
     metadata: CheckMetadata,
@@ -54,6 +64,7 @@ pub fn save_failure(
     Ok(path)
 }
 
+/// Load a previously saved replay artifact without executing either harness.
 pub fn load_artifact(path: &Path) -> Result<ReplayArtifact, String> {
     let contents = fs::read(path)
         .map_err(|error| format!("could not read replay artifact {}: {error}", path.display()))?;

@@ -1,3 +1,9 @@
+//! Harness execution and NDJSON adaptation.
+//!
+//! The generic runner communicates with custom harnesses over standard input
+//! and output. The GoogleTest adapter instead executes one filtered test per
+//! operation and synthesizes a comparable event trace from each exit status.
+
 use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -7,8 +13,10 @@ use std::time::{Duration, Instant};
 
 use crate::protocol::{ExitStatusInfo, HarnessEvent, HarnessResult, Operation};
 
+/// Per-harness execution limits.
 #[derive(Clone, Copy, Debug)]
 pub struct RunnerConfig {
+    /// Maximum wall-clock time allowed for one child process.
     pub timeout: Duration,
 }
 
@@ -20,13 +28,14 @@ impl Default for RunnerConfig {
     }
 }
 
-/// Parse a tape file as one `Operation` JSON object per non-empty line.
+/// Parse a tape file as one [`Operation`] JSON object per non-empty line.
 pub fn load_tape(path: &Path) -> Result<Vec<Operation>, String> {
     let content = fs::read_to_string(path)
         .map_err(|error| format!("could not read tape {}: {error}", path.display()))?;
     parse_tape(&content)
 }
 
+/// Parse NDJSON operation content without reading from the filesystem.
 pub fn parse_tape(content: &str) -> Result<Vec<Operation>, String> {
     content
         .lines()
@@ -39,6 +48,7 @@ pub fn parse_tape(content: &str) -> Result<Vec<Operation>, String> {
         .collect()
 }
 
+/// Encode operations in the newline-delimited form expected by custom harnesses.
 pub fn tape_to_ndjson(operations: &[Operation]) -> Result<String, String> {
     let mut output = String::new();
     for operation in operations {
@@ -50,9 +60,10 @@ pub fn tape_to_ndjson(operations: &[Operation]) -> Result<String, String> {
     Ok(output)
 }
 
-/// Run one harness with a complete operation tape. Harness output is retained
-/// even when the process exits non-zero so the comparator can explain which
-/// side failed first.
+/// Run one custom harness with a complete operation tape.
+///
+/// Harness output is retained even when the process exits non-zero so the
+/// comparator can explain which side failed first.
 pub fn run_harness(
     executable: &Path,
     operations: &[Operation],
@@ -76,10 +87,11 @@ pub fn run_harness(
     })
 }
 
-/// Run a GoogleTest binary once for every tape operation. An operation may set
-/// `args.gtest_filter` to a GoogleTest filter string; otherwise the entire
-/// binary is run. GoogleTest's human-readable output is retained as stderr,
-/// while RustyTwin synthesizes the NDJSON event trace itself.
+/// Run a GoogleTest binary once for every tape operation.
+///
+/// An operation may set `args.gtest_filter`; otherwise the full binary runs.
+/// GoogleTest's human-readable output is retained as diagnostics while
+/// RustyTwin synthesizes the NDJSON event trace from each exit status.
 pub fn run_gtest_harness(
     executable: &Path,
     operations: &[Operation],
@@ -172,6 +184,8 @@ fn run_process(
             )
         })?;
     }
+    // Drain both pipes concurrently so a verbose child cannot block while the
+    // parent waits for its process status.
     let mut stdout = child.stdout.take().expect("stdout was configured as piped");
     let mut stderr = child.stderr.take().expect("stderr was configured as piped");
     let stdout_reader = thread::spawn(move || {
@@ -194,6 +208,7 @@ fn run_process(
         }
 
         if Instant::now() >= deadline {
+            // Reap after killing so the child cannot outlive the check.
             timed_out = true;
             let _ = child.kill();
             break child.wait().map_err(|error| {

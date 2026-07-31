@@ -1,7 +1,10 @@
+//! Human-readable rendering of comparison results and saved artifacts.
+
 use serde_json::to_string_pretty;
 
 use crate::protocol::{Comparison, ReplayArtifact};
 
+/// Render a concise pass/fail summary with the first divergence, when present.
 pub fn render_comparison(comparison: &Comparison) -> String {
     if comparison.passed {
         return "Behavioral migration check: PASSED".to_owned();
@@ -23,6 +26,7 @@ pub fn render_comparison(comparison: &Comparison) -> String {
     report.trim_end().to_owned()
 }
 
+/// Render a saved artifact without exposing its full captured-output payload.
 pub fn render_artifact(artifact: &ReplayArtifact) -> String {
     let mut report = render_comparison(&artifact.comparison);
     report.push_str(&format!(

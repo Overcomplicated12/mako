@@ -1,3 +1,9 @@
+//! Persistent configuration for repeatable GoogleTest checks.
+//!
+//! A manifest identifies a CMake test target rather than a full executable
+//! path. This lets one command select a baseline and candidate build directory
+//! while retaining the same test and default filter.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -5,32 +11,44 @@ use serde::{Deserialize, Serialize};
 
 const GTEST_ADAPTER: &str = "gtest";
 
+/// TOML document consumed by `rustytwin init`, `doctor`, and `check --module`.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ModuleManifest {
+    /// Adapter-specific test configuration.
     pub module: ModuleConfig,
+    /// Default baseline build directory. Command-line input takes precedence.
     #[serde(default)]
     pub baseline: BuildConfig,
+    /// Default candidate build directory. Command-line input takes precedence.
     #[serde(default)]
     pub candidate: BuildConfig,
 }
 
+/// Settings shared by both sides of a module check.
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ModuleConfig {
+    /// Adapter name. The current manifest adapter is `gtest`.
     pub adapter: String,
+    /// CMake target and expected executable name below each build directory.
     pub test_target: String,
+    /// Optional default GoogleTest filter. No filter runs the full binary once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<String>,
+    /// Optional per-test-process timeout in milliseconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
 }
 
+/// Build-directory settings for one side of a comparison.
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct BuildConfig {
+    /// CMake build directory containing the configured test executable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub build_dir: Option<PathBuf>,
 }
 
 impl ModuleManifest {
+    /// Load and validate a manifest from TOML.
     pub fn load(path: &Path) -> Result<Self, String> {
         let contents = fs::read_to_string(path).map_err(|error| {
             format!("could not read module manifest {}: {error}", path.display())
@@ -45,6 +63,7 @@ impl ModuleManifest {
         Ok(manifest)
     }
 
+    /// Create a new GoogleTest manifest without overwriting an existing file.
     pub fn create(
         path: &Path,
         test_target: String,
@@ -95,6 +114,8 @@ impl ModuleManifest {
         })
     }
 
+    /// Validate adapter support and values that can be checked independently
+    /// of a particular build directory.
     pub fn validate(&self) -> Result<(), String> {
         if self.module.adapter != GTEST_ADAPTER {
             return Err(format!(
@@ -118,6 +139,8 @@ impl ModuleManifest {
         Ok(())
     }
 
+    /// Resolve a build directory, preferring a command-line override over the
+    /// manifest's default for the requested side.
     pub fn build_dir(
         &self,
         role: BuildRole,
@@ -138,11 +161,13 @@ impl ModuleManifest {
             })
     }
 
+    /// Derive the test executable path expected by the current adapter.
     pub fn test_path(&self, build_dir: &Path) -> PathBuf {
         build_dir.join(&self.module.test_target)
     }
 }
 
+/// The baseline or candidate side of a differential check.
 #[derive(Clone, Copy)]
 pub enum BuildRole {
     Baseline,
@@ -150,6 +175,7 @@ pub enum BuildRole {
 }
 
 impl BuildRole {
+    /// Lowercase label used in manifest sections and human-facing diagnostics.
     pub fn label(self) -> &'static str {
         match self {
             Self::Baseline => "baseline",
@@ -157,6 +183,7 @@ impl BuildRole {
         }
     }
 
+    /// Command-line flag that overrides this side's configured build directory.
     pub fn option_name(self) -> &'static str {
         match self {
             Self::Baseline => "--baseline-build",

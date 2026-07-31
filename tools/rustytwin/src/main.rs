@@ -1,3 +1,9 @@
+//! RustyTwin command-line frontend.
+//!
+//! This module parses the small dependency-free CLI and orchestrates manifest
+//! resolution, optional CMake builds, execution, comparison, and replay. The
+//! reusable behavior lives in the library modules rather than in command code.
+
 use std::env;
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
