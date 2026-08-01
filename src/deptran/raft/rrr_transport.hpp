@@ -401,9 +401,8 @@ class RrrTransportAdapter : public TransportBase {
     return core_.send_empty_append_entries(dst, std::move(req));
   }
 
-  // @unsafe - bridges per-peer send_vote onto BroadcastVoteCb fanout.
-  // BroadcastVoteCb uses rusty::Function and may fire once per peer reply;
-  // this adapter filters on `from == dst` and wakes this call's IntEvent.
+  // @unsafe - bridges the synchronous transport call to SendVoteCb's
+  // single-target rusty::Function callback API using an IntEvent reply slot.
   VoteReply send_vote(siteid_t dst, VoteReq req) override {
     return core_.send_vote(dst, std::move(req));
   }

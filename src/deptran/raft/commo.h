@@ -430,6 +430,20 @@ friend class RaftProxy;
   // @safe
   RaftCommo(rusty::Option<rusty::Arc<PollThread>> poll = rusty::None);
 
+  // The base Communicator owns the legacy, untyped proxy table. RaftServer
+  // must not reach into that rrr representation directly; these methods are
+  // the intentionally narrow lifecycle/read boundary it needs.
+  using PartitionProxyTable = map<parid_t, vector<SiteProxyPair>>;
+
+  // @unsafe - returns copies of legacy raw proxy entries owned by Communicator.
+  vector<SiteProxyPair> PeerProxies(parid_t par_id) const;
+  // @unsafe - transfers the entire legacy proxy table for test Kill/Restart.
+  PartitionProxyTable TakePartitionProxyTable();
+  // @unsafe - restores a table previously returned by TakePartitionProxyTable.
+  void RestorePartitionProxyTable(PartitionProxyTable proxy_table);
+  // @unsafe - global view gossip remains a Communicator-owned legacy concern.
+  void PublishPartitionView(parid_t partition_id, const ViewData& view_data);
+
   /**
    * SendTimeoutNow - Send TimeoutNow RPC to target replica
    *
@@ -596,16 +610,6 @@ friend class RaftProxy;
       ballot_t cur_term,
       rusty::Function<void(siteid_t, raft::VoteReply)> on_reply);
 
-  // @unsafe - legacy RPC fanout boundary: broadcasts to every peer except self.
-  // on_reply is shared across multiple async replies using the implementation's
-  // shared_ptr bridge because rusty::Function is move-only.
-  void BroadcastVoteCb(
-      parid_t par_id,
-      slotid_t lst_log_idx,
-      ballot_t lst_log_term,
-      siteid_t self_id,
-      ballot_t cur_term,
-      rusty::Function<void(siteid_t, raft::VoteReply)> on_reply);
 };
 
 } // namespace janus

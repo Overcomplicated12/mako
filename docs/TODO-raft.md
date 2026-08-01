@@ -466,9 +466,10 @@ else if (sp_quorum->no()) { ... }
       `vote_granted == true` (replaces `GetSpecVoters()`)
     - highest-term tracking across all replies (replaces
       `sp_quorum->Term()`)
-- [ ] Delete the helper branches (`yes()`, `no()`, `n_voted_yes_`,
+- [x] Delete the helper branches (`yes()`, `no()`, `n_voted_yes_`,
   `n_voted_no_`, `Term()`, `timeouted_`, `GetSpecVoters()`) now that
-  nothing calls them on the election path.
+  nothing calls them on the election path. The last unused fanout callback,
+  `BroadcastVoteCb`, is deleted too; the per-peer adapter uses `SendVoteCb`.
 - [ ] Gate: lab test tests 1-11 still pass (these exercise initial
   election + re-election). Watch TEST 1 + TEST 2 carefully.
 - **Validation note**: implementation is complete, but the local build gate is
@@ -539,17 +540,18 @@ returns `shared_ptr<SendAppendEntriesResults>`. Callers read `res->done`,
   outbound server call remains; leadership transfer currently uses the
   trigger flag on `EmptyAppendEntries`, while the facade supports standalone
   TimeoutNow for future callers.
-- [ ] Line 1194 `UpdatePartitionView` — this is gossip; either drop
-  it from the facade or leave the direct `commo()->UpdatePartitionView`
-  call (annotate `@unsafe` and note it's out of scope for 8.x).
-- [ ] Line 1408 `commo()->rpc_par_proxies_[par_id]` — this reaches
-  into rrr internals. Either wrap with a helper on `RaftCommo` that
-  RaftServer consumes, or leave as a documented `@unsafe` boundary.
-- [x] Delete `RaftVoteQuorumEvent` and the obsolete `BroadcastVote` path from
-  `commo.h` + `commo.cc` now that election uses per-peer transport sends.
+- [x] `UpdatePartitionView` remains explicit legacy view gossip through
+  `RaftCommo::PublishPartitionView`. It is an `@unsafe` communicator-owned
+  global-view boundary and intentionally is not part of `TransportProxy`.
+- [x] Peer proxy lookup and test Kill/Restart table transfer now use the
+  narrow `RaftCommo::{PeerProxies,TakePartitionProxyTable,
+  RestorePartitionProxyTable}` boundary; `RaftServer` no longer reaches into
+  `rpc_par_proxies_`.
+- [x] Delete `RaftVoteQuorumEvent`, `BroadcastVote`, and `BroadcastVoteCb`
+  from `commo.h` + `commo.cc` now that election uses per-peer transport sends.
 - [ ] Gate: full lab test + `shard1ReplicationRaft` throughput
   (≥80k ops/sec per docs/dev/raft_decouple_plan.md completion criteria).
-- [ ] **Commit**: `raft: phase 8.1e — retire remaining commo() outbound
+- [x] **Commit**: `raft: phase 8.1e — retire remaining commo() outbound
   call sites; delete SendAppendEntriesResults + RaftVoteQuorumEvent`.
 
 Validation: Clang 22 `mako` build plus `test_raft_quorum`,
@@ -874,7 +876,7 @@ verification. Listed here so they don't get lost.
 - [x] Phase 8.1b — TransportProxy member on RaftServer
 - [x] Phase 8.1c — migrate BroadcastVote (implementation; validation pending)
 - [x] Phase 8.1d — migrate SendAppendEntries / SendAppendEntries2 (implementation; validation pending)
-- [ ] Phase 8.1e — retire remaining commo() outbound sites
+- [x] Phase 8.1e — retire remaining commo() outbound sites
 - [x] Phase 8.2 — RaftServerDispatcher (implementation; full test gate pending)
 - [x] Phase 8.3 — RaftServiceImpl → DispatcherProxy (implementation; full test gate pending)
 - [ ] Phase 8.4 — storage proxies (optional)

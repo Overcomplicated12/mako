@@ -37,6 +37,33 @@ namespace janus
     //  verify(poll != nullptr);
   }
 
+  // @unsafe - copies legacy raw proxy pointers from Communicator ownership.
+  vector<SiteProxyPair> RaftCommo::PeerProxies(parid_t par_id) const {
+    auto it = rpc_par_proxies_.find(par_id);
+    if (it == rpc_par_proxies_.end()) {
+      return {};
+    }
+    return it->second;
+  }
+
+  // @unsafe - used only by the RAFT_TEST_CORO Kill/Restart lifecycle.
+  RaftCommo::PartitionProxyTable RaftCommo::TakePartitionProxyTable() {
+    PartitionProxyTable proxy_table = std::move(rpc_par_proxies_);
+    rpc_par_proxies_.clear();
+    return proxy_table;
+  }
+
+  // @unsafe - restores raw proxy ownership after a RAFT_TEST_CORO restart.
+  void RaftCommo::RestorePartitionProxyTable(PartitionProxyTable proxy_table) {
+    rpc_par_proxies_ = std::move(proxy_table);
+  }
+
+  // @unsafe - Communicator maintains the process-wide partition view map.
+  void RaftCommo::PublishPartitionView(parid_t partition_id,
+                                       const ViewData& view_data) {
+    Communicator::UpdatePartitionView(partition_id, view_data);
+  }
+
   // ============================================================================
   // TimeoutNow RPC - Leadership Transfer Protocol
   // ============================================================================
@@ -768,70 +795,6 @@ namespace janus
           Future::safe_release(f.unwrap().raw_future());
         }
         return;
-      }
-    }
-
-    // @unsafe - legacy RPC boundary with fanout: raw RaftProxy casts and async
-    // FutureAttr callbacks. The same rusty::Function callback is shared across
-    // multiple peer replies through shared_ptr.
-    void RaftCommo::BroadcastVoteCb(
-        parid_t par_id,
-        slotid_t lst_log_idx,
-        ballot_t lst_log_term,
-        siteid_t self_id,
-        ballot_t cur_term,
-        rusty::Function<void(siteid_t, raft::VoteReply)> on_reply)
-    {
-      auto proxies = rpc_par_proxies_[par_id];
-      WAN_WAIT;
-
-      // @safe - BroadcastVoteCb fans out to many peers, so the move-only
-      // rusty::Function cannot be moved into each lambda. shared_ptr gives each
-      // async callback shared access to the same reply handler.
-      auto on_reply_ptr = std::make_shared<rusty::Function<void(siteid_t, raft::VoteReply)>>(std::move(on_reply));
-      for (auto &p : proxies)
-      {
-        auto site_id = p.first;
-        if (commo_proxy_is_self(site_id, self_id))
-          continue;
-        RaftProxy *proxy;
-        // @unsafe - legacy proxy table stores untyped proxy pointers;
-        // each peer entry is expected to be a RaftProxy*.
-        {
-          proxy = (RaftProxy *)p.second;
-        }
-        FutureAttr fuattr;
-        // @unsafe - callback is invoked asynchronously by the legacy RPC runtime.
-        // Captures only site_id and shared ownership of the reply handler.
-        fuattr.callback = [on_reply_ptr, site_id](rusty::Arc<Future> fu)
-        {
-          if (commo_future_failed(fu->get_error_code()))
-          {
-            Log_debug("[VOTE_RPC_CB] Error from site {} code={}",
-                      site_id, fu->get_error_code());
-            return;
-          }
-          ballot_t term = 0;
-          bool_t vote = false;
-          rrr::deserialize_from(fu->get_reply(), term);
-          rrr::deserialize_from(fu->get_reply(), vote);
-          raft::VoteReply r = commo_make_vote_reply(term, vote);
-          if (commo_callback_is_set(static_cast<bool>(*on_reply_ptr)))
-          {
-            (*on_reply_ptr)(site_id, r);
-          }
-        };
-        RaftProxy::RpcVoteRequest req{};
-        req.lst_log_idx = lst_log_idx;
-        req.lst_log_term = lst_log_term;
-        req.site_id = self_id;
-        req.cur_term = cur_term;
-        auto f = proxy->async_Vote(req, fuattr);
-        _RPC_COUNT();
-        if (commo_future_result_ok(f.is_ok()))
-        {
-          Future::safe_release(f.unwrap().raw_future());
-        }
       }
     }
 

@@ -1105,8 +1105,9 @@ void RaftServer::Setup() {
 void RaftServer::Disconnect(const bool disconnect) {
   std::lock_guard<std::recursive_mutex> lock(mtx_);
   verify(disconnected_ != disconnect);
-  // global map of rpc_par_proxies_ values accessed by partition then by site
-  static map<parid_t, map<siteid_t, map<siteid_t, vector<SiteProxyPair>>>> _proxies{};
+  // Saved proxy tables are keyed by partition and site for the test-only
+  // Kill/Restart path. RaftCommo retains ownership of the raw rrr layout.
+  static map<parid_t, map<siteid_t, RaftCommo::PartitionProxyTable>> _proxies{};
   if (_proxies.find(partition_id_) == _proxies.end()) {
     _proxies[partition_id_] = {};
   }
@@ -1120,20 +1121,17 @@ void RaftServer::Disconnect(const bool disconnect) {
                partition_id_, loc_id_, _proxies[partition_id_][loc_id_].size());
       _proxies[partition_id_][loc_id_].clear();
     }
-    verify(c->rpc_par_proxies_.size() > 0);
-    auto sz = c->rpc_par_proxies_.size();
-    _proxies[partition_id_][loc_id_].insert(c->rpc_par_proxies_.begin(), c->rpc_par_proxies_.end());
-    c->rpc_par_proxies_ = {};
+    auto proxy_table = c->TakePartitionProxyTable();
+    verify(proxy_table.size() > 0);
+    auto sz = proxy_table.size();
+    _proxies[partition_id_][loc_id_] = std::move(proxy_table);
     verify(_proxies[partition_id_][loc_id_].size() == sz);
-    verify(c->rpc_par_proxies_.size() == 0);
   } else {
     verify(_proxies[partition_id_][loc_id_].size() > 0);
-    auto sz = _proxies[partition_id_][loc_id_].size();
-    c->rpc_par_proxies_ = {};
-    c->rpc_par_proxies_.insert(_proxies[partition_id_][loc_id_].begin(), _proxies[partition_id_][loc_id_].end());
+    c->RestorePartitionProxyTable(std::move(_proxies[partition_id_][loc_id_]));
     _proxies[partition_id_][loc_id_] = {};
     verify(_proxies[partition_id_][loc_id_].size() == 0);
-    verify(c->rpc_par_proxies_.size() == sz);
+    verify(c->PeerProxies(partition_id_).size() > 0);
   }
   disconnected_ = disconnect;
 }
@@ -1174,7 +1172,7 @@ void RaftServer::setIsLeader(bool isLeader) {
       {
       RaftCommo *c = (RaftCommo*) commo();
       verify(c != nullptr);
-      proxies = c->rpc_par_proxies_[partition_id_];
+      proxies = c->PeerProxies(partition_id_);
       }
       if(failover_) {
         for (auto& p : proxies) {
@@ -1245,7 +1243,7 @@ void RaftServer::setIsLeader(bool isLeader) {
       if (commo_) {
         auto view_data = std::make_shared<ViewData>(new_view_, partition_id_);
         // @unsafe
-        { commo()->UpdatePartitionView(partition_id_, *view_data); }
+        { commo()->PublishPartitionView(partition_id_, *view_data); }
         Log_info("[RAFT_VIEW] Updated communicator view for partition {} with new leader {}",
                  partition_id_, site_id_);
       }
@@ -1452,7 +1450,7 @@ void RaftServer::HeartbeatLoop() {
     vector<SiteProxyPair> proxies;
     // @unsafe
     {
-    proxies = commo()->rpc_par_proxies_[partition_id];
+    proxies = commo()->PeerProxies(partition_id);
     }
     for (auto& p : proxies) {
       if (p.first == site_id_) {
