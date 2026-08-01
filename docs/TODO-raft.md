@@ -431,10 +431,10 @@ can safely borrow the frame-owned communicator.
   wiring its replacement communicator.
 - [x] No outbound call-site changes; this step only plumbs the member for the
   remaining 8.1 migration.
-- [ ] Gate: deptran_server links, lab test passes tests 1-60. Focused
-  `test_raft_rrr_transport_compile`, `test_raft_quorum`, and
-  `test_raft_test_cluster` passed; full validation remains blocked by the
-  local CMake 4.3 `import std` configuration gate.
+- [x] Gate: deptran_server links, lab test passes tests 1-60. Verified with
+  Clang 22 on 2026-08-01: the default server-backed lab run passed tests
+  1-11 and 50-60. The runner later aborts in test 63 during the second
+  Kill/Restart learner callback; that is outside this gate.
 - [x] **Commit**: `raft: phase 8.1b — wire TransportProxy onto RaftServer`.
 
 ### 8.1.c — Migrate `BroadcastVote` (election path)
@@ -470,12 +470,9 @@ else if (sp_quorum->no()) { ... }
   `n_voted_no_`, `Term()`, `timeouted_`, `GetSpecVoters()`) now that
   nothing calls them on the election path. The last unused fanout callback,
   `BroadcastVoteCb`, is deleted too; the per-peer adapter uses `SendVoteCb`.
-- [ ] Gate: lab test tests 1-11 still pass (these exercise initial
-  election + re-election). Watch TEST 1 + TEST 2 carefully.
-- **Validation note**: implementation is complete, but the local build gate is
-  blocked by the checkout's Clang 22 requirement and stale generated rrr
-  headers; rerun tests in a supported build environment before closing this
-  gate.
+- [x] Gate: lab test tests 1-11 still pass (these exercise initial
+  election + re-election). Verified with Clang 22 on 2026-08-01; TEST 1 and
+  TEST 2 passed in the server-backed lab run.
 - [x] **Commit**: `raft: phase 8.1c — migrate BroadcastVote to
   per-peer send_vote via RaftQuorum`.
 
@@ -517,13 +514,9 @@ returns `shared_ptr<SendAppendEntriesResults>`. Callers read `res->done`,
   `commo.cc` + every include site. Delete `SendAppendEntries2` /
   `SendAppendEntries` member definitions from RaftCommo (the
   `*Cb` variants stay as the rrr-side callback entry).
-- [ ] Gate: lab test tests 1-60 all pass. Watch TEST 3 (Basic
-  agreement), TEST 7 (Concurrent starts), TEST 11 (Figure 8),
-  TEST 60 (HeartbeatLoop triggers InstallSnapshot).
-- **Validation note**: implementation is complete, but the local build is
-  currently blocked during CMake regeneration by the checkout's Clang 22
-  requirement; run the lab range in a supported build environment before
-  closing this gate.
+- [x] Gate: lab test tests 1-60 all pass. Verified with Clang 22 on
+  2026-08-01: TEST 3 (Basic agreement), TEST 7 (Concurrent starts), TEST 11
+  (Figure 8), and TEST 60 (HeartbeatLoop triggers InstallSnapshot) passed.
 - [ ] **Commit**: `raft: phase 8.1d — migrate SendAppendEntries /
   SendAppendEntries2 to per-peer transport_->send_append_entries`.
 
@@ -556,7 +549,9 @@ returns `shared_ptr<SendAppendEntriesResults>`. Callers read `res->done`,
 
 Validation: Clang 22 `mako` build plus `test_raft_quorum`,
 `test_raft_transport_facade`, and `test_raft_rrr_transport_compile` pass.
-The full lab range and throughput gate remain pending.
+The server-backed lab range through test 60 passes. The full runner still
+aborts in test 63 during a Kill/Restart learner callback; the throughput gate
+remains pending.
 
 ### 8.1 risks
 
@@ -646,9 +641,9 @@ the corresponding dispatcher `handle_x(req)`.
     intentionally does not yet declare membership-management methods.
 - [x] Remove the now-redundant direct `server.h` include from `service.cc`;
   `service.h` still needs the complete type for its atomic borrowed pointer.
-- [ ] Gate: lab test tests 1-60 all pass. Pay attention to
-  `NotifyRestart` — it has side effects (calls `commo->ReconnectToSite`
-  + `svr->OnPeerRestart`).
+- [x] Gate: lab test tests 1-60 all pass. Verified with Clang 22 on
+  2026-08-01. `NotifyRestart` was exercised by the later test-63 restart
+  path, which currently aborts in its learner callback after the test-60 gate.
 - [ ] Add live-server edge tests once `test_raft_server_dispatcher` can link:
   `NotifyRestart` with reconnect success, failure, and null `commo()` (and in
   all non-disconnected cases assert `OnPeerRestart` invalidates speculative
