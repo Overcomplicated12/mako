@@ -1497,6 +1497,11 @@ class RaftServer : public TxLogServer {
   std::atomic<bool> apply_pending_{false};  // Tracks if new work arrived while applying logs
 #ifdef RAFT_TEST_CORO
   bool failover_{true} ;
+  // The in-memory server harness has no TCP listener, so restart-dispatch
+  // tests supply only the reconnect result while retaining a real server.
+  using ReconnectToSiteForTestHook = bool (*)(void*, siteid_t, parid_t);
+  void* reconnect_to_site_for_test_context_ = nullptr;
+  ReconnectToSiteForTestHook reconnect_to_site_for_test_ = nullptr;
 #else
   bool failover_{true} ;
 #endif
@@ -1849,6 +1854,27 @@ class RaftServer : public TxLogServer {
   RaftCommo* commo() {
     return (RaftCommo*) commo_;
   }
+
+  // @unsafe - delegates TCP reconnection to the externally owned
+  // communicator. The test-only callback makes that result deterministic for
+  // the in-memory live-server harness without constructing real TCP clients.
+  bool ReconnectToSite(siteid_t site_id, parid_t par_id) {
+#ifdef RAFT_TEST_CORO
+    if (reconnect_to_site_for_test_ != nullptr) {
+      return reconnect_to_site_for_test_(reconnect_to_site_for_test_context_,
+                                         site_id, par_id);
+    }
+#endif
+    auto* c = commo();
+    return c != nullptr && c->ReconnectToSite(site_id, par_id);
+  }
+
+#ifdef RAFT_TEST_CORO
+  void SetReconnectToSiteForTest(void* context, ReconnectToSiteForTestHook hook) {
+    reconnect_to_site_for_test_context_ = context;
+    reconnect_to_site_for_test_ = hook;
+  }
+#endif
 
   // @safe - valid after initialization; callers receive the owned adapter.
   raft::TransportProxy& transport() {

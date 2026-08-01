@@ -123,7 +123,10 @@ inline rusty::Option<rusty::Arc<rrr::PollThread>> RaftServiceStateCore::clone_po
 /*RUSTYCPP:GEN-END id=service.state_core*/
 
 // @unsafe - RPC service adapter. rrr owns service object lifetime after
-// registration; this class only tracks a borrowed/atomic RaftServer pointer.
+// registration. The server pointer remains borrowed, but every handler takes
+// the lifecycle mutex while it uses that pointer. UpdateServer() waits on
+// the same mutex before publishing a replacement, so Kill() can destroy the
+// old frame only after in-flight RPCs have stopped dereferencing it.
 class RaftServiceImpl : public RaftService {
  public:
   // Static registry to find services by site_id (for Kill/Restart support).
@@ -136,7 +139,22 @@ class RaftServiceImpl : public RaftService {
   // boundaries for now.
   RaftServiceStateCore state_core_;
 
+  // Guards the lifetime of the server borrowed from state_core_. A handler
+  // holds it across dispatcher construction and the OnX call; UpdateServer
+  // waits on the same lock while publishing a new pointer.
+  std::mutex server_lifecycle_mutex_;
+
+#ifdef RAFT_TEST_CORO
+  // Test-only rendezvous used to keep a real RPC inside its handler lease
+  // while the lab-style Kill/Restart test attempts UpdateServer(nullptr).
+  using BeforeDispatchHook = void (*)(void*);
+  std::mutex dispatch_hook_mutex_;
+  void* before_dispatch_hook_context_ = nullptr;
+  BeforeDispatchHook before_dispatch_hook_ = nullptr;
+#endif
+
   RaftServiceImpl(TxLogServer* sched, rusty::Arc<rrr::PollThread> poll_thread);
+  ~RaftServiceImpl();
 
   // Called by test framework during Kill/Restart to publish the current
   // borrowed server pointer. Passing nullptr marks the service as down.
@@ -145,8 +163,16 @@ class RaftServiceImpl : public RaftService {
   // Called by test framework during Restart to get the original poll thread.
   static rusty::Option<rusty::Arc<rrr::PollThread>> GetPollThread(siteid_t site_id);
 
-  // Called by RPC handlers - lock-free atomic read of the borrowed server.
+  // Raw inspection only. RPC handlers instead retain server_lifecycle_mutex_
+  // for the full dispatch, because a naked borrowed pointer cannot outlive a
+  // concurrent UpdateServer(nullptr).
   RaftServer* GetServer();
+
+#ifdef RAFT_TEST_CORO
+  // Installs a synchronization point executed while an RPC handler holds its
+  // lifecycle lock. This is intentionally test-only.
+  void SetBeforeDispatchHookForTest(void* context, void (*hook)(void*));
+#endif
 
   // Generated fiber-RPC overrides. The rrr codegen wraps each one in a
   // Fiber::create_run; we return a packed response struct and the

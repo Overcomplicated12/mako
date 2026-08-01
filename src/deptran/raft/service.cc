@@ -1,4 +1,5 @@
 #include "service.h"
+#include "service_test_hooks.hpp"
 #include "raft_server_dispatcher.hpp"
 
 #include "rrr/rrr.hpp"
@@ -78,7 +79,18 @@ bool raft_service_poll_thread_available(bool found, bool has_poll_thread) {
 
 Result<RaftService::RpcVoteResponse, rrr::i32>
 RaftServiceImpl::Vote(const RpcVoteRequest& req) {
-  auto dispatcher = raft::make_raft_server_dispatcher(GetServer());
+  std::unique_lock<std::mutex> lease(server_lifecycle_mutex_);
+#ifdef RAFT_TEST_CORO
+  void* hook_context = nullptr;
+  BeforeDispatchHook hook = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(dispatch_hook_mutex_);
+    hook_context = before_dispatch_hook_context_;
+    hook = before_dispatch_hook_;
+  }
+  if (hook) hook(hook_context);
+#endif
+  auto dispatcher = raft::make_raft_server_dispatcher(state_core_.server());
   auto reply = dispatcher->handle_vote(
       raft::VoteReq{req.lst_log_idx, req.lst_log_term, req.site_id, req.cur_term});
   RpcVoteResponse resp{};
@@ -89,7 +101,8 @@ RaftServiceImpl::Vote(const RpcVoteRequest& req) {
 
 Result<RaftService::RpcVoteDurableResponse, rrr::i32>
 RaftServiceImpl::VoteDurable(const RpcVoteDurableRequest& req) {
-  auto dispatcher = raft::make_raft_server_dispatcher(GetServer());
+  std::unique_lock<std::mutex> lease(server_lifecycle_mutex_);
+  auto dispatcher = raft::make_raft_server_dispatcher(state_core_.server());
   auto reply = dispatcher->handle_vote_durable(
       raft::VoteDurableReq{req.term, req.voter_id});
   RpcVoteDurableResponse resp{};
@@ -99,7 +112,8 @@ RaftServiceImpl::VoteDurable(const RpcVoteDurableRequest& req) {
 
 Result<RaftService::RpcAppendEntriesResponse, rrr::i32>
 RaftServiceImpl::AppendEntries(const RpcAppendEntriesRequest& req) {
-  auto dispatcher = raft::make_raft_server_dispatcher(GetServer());
+  std::unique_lock<std::mutex> lease(server_lifecycle_mutex_);
+  auto dispatcher = raft::make_raft_server_dispatcher(state_core_.server());
   auto reply = dispatcher->handle_append_entries(raft::AppendEntriesReq{
       req.slot, req.ballot, req.leaderCurrentTerm, req.leaderSiteId,
       req.leaderPrevLogIndex, req.leaderPrevLogTerm, req.leaderCommitIndex,
@@ -115,7 +129,8 @@ RaftServiceImpl::AppendEntries(const RpcAppendEntriesRequest& req) {
 Result<RaftService::RpcEmptyAppendEntriesResponse, rrr::i32>
 RaftServiceImpl::EmptyAppendEntries(const RpcEmptyAppendEntriesRequest& req) {
   Log_debug("RaftServiceImpl: EmptyAppendEntries answering leader {}", req.leaderSiteId);
-  auto dispatcher = raft::make_raft_server_dispatcher(GetServer());
+  std::unique_lock<std::mutex> lease(server_lifecycle_mutex_);
+  auto dispatcher = raft::make_raft_server_dispatcher(state_core_.server());
   auto reply = dispatcher->handle_empty_append_entries(
       raft::EmptyAppendEntriesReq{
           req.slot, req.ballot, req.leaderCurrentTerm, req.leaderSiteId,
@@ -131,7 +146,8 @@ RaftServiceImpl::EmptyAppendEntries(const RpcEmptyAppendEntriesRequest& req) {
 
 Result<RaftService::RpcAppendEntriesDurableResponse, rrr::i32>
 RaftServiceImpl::AppendEntriesDurable(const RpcAppendEntriesDurableRequest& req) {
-  auto dispatcher = raft::make_raft_server_dispatcher(GetServer());
+  std::unique_lock<std::mutex> lease(server_lifecycle_mutex_);
+  auto dispatcher = raft::make_raft_server_dispatcher(state_core_.server());
   auto reply = dispatcher->handle_append_entries_durable(
       raft::AppendEntriesDurableReq{req.term, req.follower_id, req.lastLogIndex});
   RpcAppendEntriesDurableResponse resp{};
@@ -141,7 +157,8 @@ RaftServiceImpl::AppendEntriesDurable(const RpcAppendEntriesDurableRequest& req)
 
 Result<RaftService::RpcTimeoutNowResponse, rrr::i32>
 RaftServiceImpl::TimeoutNow(const RpcTimeoutNowRequest& req) {
-  auto dispatcher = raft::make_raft_server_dispatcher(GetServer());
+  std::unique_lock<std::mutex> lease(server_lifecycle_mutex_);
+  auto dispatcher = raft::make_raft_server_dispatcher(state_core_.server());
   auto reply = dispatcher->handle_timeout_now(
       raft::TimeoutNowReq{req.leaderTerm, req.leaderSiteId});
   RpcTimeoutNowResponse resp{};
@@ -154,7 +171,8 @@ Result<RaftService::RpcNotifyRestartResponse, rrr::i32>
 RaftServiceImpl::NotifyRestart(const RpcNotifyRestartRequest& req) {
   Log_info("[NOTIFY-RESTART] Received restart notification from site {}",
            req.restartedSiteId);
-  auto dispatcher = raft::make_raft_server_dispatcher(GetServer());
+  std::unique_lock<std::mutex> lease(server_lifecycle_mutex_);
+  auto dispatcher = raft::make_raft_server_dispatcher(state_core_.server());
   auto reply = dispatcher->handle_notify_restart(
       raft::NotifyRestartReq{req.restartedSiteId});
   RpcNotifyRestartResponse resp{};
@@ -164,7 +182,8 @@ RaftServiceImpl::NotifyRestart(const RpcNotifyRestartRequest& req) {
 
 Result<RaftService::RpcInstallSnapshotResponse, rrr::i32>
 RaftServiceImpl::InstallSnapshot(const RpcInstallSnapshotRequest& req) {
-  auto dispatcher = raft::make_raft_server_dispatcher(GetServer());
+  std::unique_lock<std::mutex> lease(server_lifecycle_mutex_);
+  auto dispatcher = raft::make_raft_server_dispatcher(state_core_.server());
   auto reply = dispatcher->handle_install_snapshot(
       raft::InstallSnapshotReq{req.term, req.leader_id, req.last_included_index,
                                req.last_included_term, req.data});
@@ -176,7 +195,8 @@ RaftServiceImpl::InstallSnapshot(const RpcInstallSnapshotRequest& req) {
 Result<RaftService::RpcAddServerResponse, rrr::i32>
 RaftServiceImpl::AddServer(const RpcAddServerRequest& req) {
   RpcAddServerResponse resp{};
-  RaftServer* svr = GetServer();
+  std::unique_lock<std::mutex> lease(server_lifecycle_mutex_);
+  RaftServer* svr = state_core_.server();
   bool has_server = svr != nullptr;
   bool disconnected = has_server && svr->IsDisconnected();
   if (raft_service_server_unavailable(has_server, disconnected)) {
@@ -193,7 +213,8 @@ RaftServiceImpl::AddServer(const RpcAddServerRequest& req) {
 Result<RaftService::RpcRemoveServerResponse, rrr::i32>
 RaftServiceImpl::RemoveServer(const RpcRemoveServerRequest& req) {
   RpcRemoveServerResponse resp{};
-  RaftServer* svr = GetServer();
+  std::unique_lock<std::mutex> lease(server_lifecycle_mutex_);
+  RaftServer* svr = state_core_.server();
   bool has_server = svr != nullptr;
   bool disconnected = has_server && svr->IsDisconnected();
   if (raft_service_server_unavailable(has_server, disconnected)) {
@@ -236,12 +257,23 @@ RaftServiceImpl::RaftServiceImpl(TxLogServer *sched, rusty::Arc<rrr::PollThread>
   srand(curr_time.tv_nsec);
 }
 
+RaftServiceImpl::~RaftServiceImpl() {
+  std::lock_guard<std::mutex> lock(registry_mutex_);
+  auto it = service_registry_.find(state_core_.site_id());
+  if (it != service_registry_.end() && it->second == this) {
+    service_registry_.erase(it);
+  }
+}
+
 void RaftServiceImpl::UpdateServer(siteid_t site_id, RaftServer* new_svr) {
   std::lock_guard<std::mutex> lock(registry_mutex_);
   auto it = service_registry_.find(site_id);
   if (it != service_registry_.end()) {
-    // Publish a borrowed server pointer for future RPC handlers. nullptr is
-    // intentional during Kill(); handlers then return disconnected defaults.
+    // Wait for every in-flight handler using the old borrowed pointer before
+    // publishing nullptr/replacement. Kill() may destroy the old frame as
+    // soon as this returns, so acquire/release alone is not sufficient.
+    std::unique_lock<std::mutex> server_lock(
+        it->second->server_lifecycle_mutex_);
     it->second->state_core_.set_server(new_svr);
     Log_info("[RAFT-SERVICE] UpdateServer: site {} -> {}", site_id, (void*)new_svr);
   } else {
@@ -250,10 +282,95 @@ void RaftServiceImpl::UpdateServer(siteid_t site_id, RaftServer* new_svr) {
 }
 
 RaftServer* RaftServiceImpl::GetServer() {
-  // Borrowed pointer load paired with UpdateServer's release-store. The caller
-  // must null-check before dereferencing because Kill() publishes nullptr.
+  // This is an inspection-only atomic snapshot. RPC handlers acquire a
+  // lifecycle lease before loading and dereferencing the same pointer.
   return state_core_.server();
 }
+
+#ifdef RAFT_TEST_CORO
+void RaftServiceImpl::SetBeforeDispatchHookForTest(void* context,
+                                                   void (*hook)(void*)) {
+  std::lock_guard<std::mutex> lock(dispatch_hook_mutex_);
+  before_dispatch_hook_context_ = context;
+  before_dispatch_hook_ = hook;
+}
+
+namespace {
+
+struct ServiceUpdateTestGate {
+  std::atomic<bool> entered{false};
+  std::atomic<bool> release{false};
+};
+
+void block_service_dispatch_for_update_test(void* context) {
+  auto* gate = static_cast<ServiceUpdateTestGate*>(context);
+  gate->entered.store(true, std::memory_order_release);
+  while (!gate->release.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+}
+
+}  // namespace
+
+bool raft::run_raft_service_update_server_in_flight_test(
+    RaftServer* first, RaftServer* replacement) {
+  if (first == nullptr || replacement == nullptr) {
+    return false;
+  }
+
+  auto poll_thread = rrr::PollThread::create();
+  RaftServiceImpl service(static_cast<TxLogServer*>(first), poll_thread.clone());
+  RaftService::RpcVoteRequest request{};
+  request.lst_log_idx = 0;
+  request.lst_log_term = 0;
+  request.site_id = 2;
+  request.cur_term = 3;
+
+  ServiceUpdateTestGate gate;
+  service.SetBeforeDispatchHookForTest(&gate, &block_service_dispatch_for_update_test);
+
+  uint64_t in_flight_term = 0;
+  bool in_flight_ok = false;
+  std::thread rpc([&] {
+    auto response = service.Vote(request);
+    if (response.is_ok()) {
+      in_flight_term = response.unwrap().max_ballot;
+      in_flight_ok = true;
+    }
+  });
+  while (!gate.entered.load(std::memory_order_acquire)) {
+    std::this_thread::yield();
+  }
+
+  std::atomic<bool> update_finished{false};
+  std::thread kill([&] {
+    RaftServiceImpl::UpdateServer(first->site_id_, nullptr);
+    update_finished.store(true, std::memory_order_release);
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  const bool update_waited_for_dispatch =
+      !update_finished.load(std::memory_order_acquire);
+
+  gate.release.store(true, std::memory_order_release);
+  rpc.join();
+  kill.join();
+
+  service.SetBeforeDispatchHookForTest(nullptr, nullptr);
+  auto down = service.Vote(request);
+  const bool down_ok = down.is_ok() && down.unwrap().max_ballot == 3 &&
+                       !down.unwrap().vote_granted;
+
+  RaftServiceImpl::UpdateServer(first->site_id_, replacement);
+  auto after_restart = service.Vote(request);
+  const bool replacement_ok =
+      after_restart.is_ok() && after_restart.unwrap().max_ballot == 11 &&
+      !after_restart.unwrap().vote_granted;
+
+  return in_flight_ok && in_flight_term == 7 && update_waited_for_dispatch &&
+         update_finished.load(std::memory_order_acquire) && down_ok &&
+         replacement_ok;
+}
+#endif
 
 rusty::Option<rusty::Arc<rrr::PollThread>>
 RaftServiceImpl::GetPollThread(siteid_t site_id) {

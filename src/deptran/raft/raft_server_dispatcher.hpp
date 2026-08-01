@@ -112,11 +112,8 @@ class RaftServerDispatcher final : public DispatcherBase {
       return reply;
     }
 
-    auto commo = svr_->commo();
-    if (commo != nullptr) {
-      reply.acknowledged = commo->ReconnectToSite(req.restarted_site_id,
-                                                  svr_->partition_id_);
-    }
+    reply.acknowledged =
+        svr_->ReconnectToSite(req.restarted_site_id, svr_->partition_id_);
 
     // Always invalidate this peer's speculative state, even if there is no
     // communicator to reconnect. This mirrors RaftServiceImpl::NotifyRestart.

@@ -644,19 +644,19 @@ the corresponding dispatcher `handle_x(req)`.
 - [x] Gate: lab test tests 1-60 all pass. Verified with Clang 22 on
   2026-08-01. `NotifyRestart` was exercised by the later test-63 restart
   path, which currently aborts in its learner callback after the test-60 gate.
-- [ ] Add live-server edge tests once `test_raft_server_dispatcher` can link:
-  `NotifyRestart` with reconnect success, failure, and null `commo()` (and in
-  all non-disconnected cases assert `OnPeerRestart` invalidates speculative
-  state); `EmptyAppendEntries` with both trigger-election values; stale-term
-  and conflicting-prefix `AppendEntries`; stale/equal-index
-  `InstallSnapshot`; and `TimeoutNow` rejection without an election. These
-  need a real test server because the adapter deliberately calls non-virtual
-  `RaftServer::OnX` methods.
-- [ ] Add a Kill/Restart-in-flight lab case: publish `nullptr` via
-  `UpdateServer()` while an RPC is pending, then install a replacement and
-  verify no request uses a cached dispatcher/server pointer. The current
-  short-lived dispatcher design is intended to make this safe, but it needs
-  the full harness to validate the lifetime race.
+- [x] Add live-server edge tests in `test_raft_server_dispatcher`:
+  `NotifyRestart` reconnect success, failure, and null `commo()` all assert
+  `OnPeerRestart` invalidates speculative state; `EmptyAppendEntries` covers
+  both trigger-election values; `AppendEntries` covers stale term and a
+  conflicting prefix; `InstallSnapshot` covers stale and equal index; and
+  `TimeoutNow` rejects a stale request without starting an election. The
+  reconnect outcomes use a `RAFT_TEST_CORO` callback, while every adapter call
+  reaches a real in-memory `RaftServer` and its non-virtual `OnX` method.
+- [x] Add a Kill/Restart-in-flight service test: the live-server fixture calls
+  `raft::run_raft_service_update_server_in_flight_test`, which blocks a real
+  `Vote` handler, proves `UpdateServer(nullptr)` waits for its lifecycle lock,
+  then verifies the null reply and a replacement server response. This checks
+  that no request retains a cached dispatcher/server pointer across the swap.
 - [x] **Commit**: `6f33fdda raft: phase 8.3 route service through dispatcher`.
 
 ### 8.3 lifecycle note
