@@ -1428,6 +1428,113 @@ void RaftServer::applyLogs() {
   }
 }
 
+// The in-memory cluster drives replication explicitly instead of starting the
+// production heartbeat fiber: that fiber requires RaftCommo/Frame state which
+// the named test bootstrap intentionally does not construct.
+bool RaftServer::DriveReplicationOnceForInMemoryTest() {
+  std::vector<siteid_t> peers;
+  {
+    std::lock_guard<std::recursive_mutex> lock(mtx_);
+    if (stop_ || !IsLeader()) return false;
+    for (auto peer : current_config()) {
+      if (peer == site_id_) continue;
+      if (next_index_.find(peer) == next_index_.end()) {
+        next_index_[peer] = lastLogIndex + 1;
+      }
+      if (match_index_.find(peer) == match_index_.end()) {
+        match_index_[peer] = 0;
+      }
+      peers.push_back(peer);
+    }
+  }
+
+  for (auto peer : peers) {
+    uint64_t term = 0;
+    uint64_t previous_index = 0;
+    uint64_t previous_term = 0;
+    uint64_t leader_commit = 0;
+    uint64_t entry_term = 0;
+    janus::Command entry{};
+    bool has_entry = false;
+    {
+      std::lock_guard<std::recursive_mutex> lock(mtx_);
+      if (stop_ || !IsLeader()) return false;
+      auto& next = next_index_[peer];
+      if (next == 0 || next > lastLogIndex + 1) next = lastLogIndex + 1;
+      previous_index = next - 1;
+      if (previous_index != 0) {
+        previous_term = GetRaftInstance(previous_index)->term;
+      }
+      if (next <= lastLogIndex) {
+        auto instance = GetRaftInstance(next);
+        entry = instance->log_;
+        entry_term = instance->term;
+        has_entry = entry.has_value();
+      }
+      term = currentTerm;
+      leader_commit = commitIndex;
+    }
+
+    raft::AppendEntriesReply reply{};
+    if (has_entry) {
+      reply = transport()->send_append_entries(
+          peer, raft::AppendEntriesReq{static_cast<uint64_t>(-1),
+                                       static_cast<int64_t>(-1), term, site_id_,
+                                       previous_index, previous_term,
+                                       leader_commit, std::move(entry),
+                                       entry_term});
+    } else {
+      auto empty_reply = transport()->send_empty_append_entries(
+          peer, raft::EmptyAppendEntriesReq{static_cast<uint64_t>(-1),
+                                             static_cast<int64_t>(-1), term,
+                                             site_id_, previous_index,
+                                             previous_term, leader_commit,
+                                             false});
+      reply = raft::AppendEntriesReply{empty_reply.follower_append_ok,
+                                       empty_reply.follower_current_term,
+                                       empty_reply.follower_last_log_index,
+                                       empty_reply.follower_ack_type};
+    }
+
+    std::lock_guard<std::recursive_mutex> lock(mtx_);
+    if (stop_ || currentTerm != term || !IsLeader()) continue;
+    if (reply.follower_append_ok != 0) {
+      match_index_[peer] = std::min(reply.follower_last_log_index, lastLogIndex);
+      next_index_[peer] = match_index_[peer] + 1;
+    } else if (reply.follower_current_term > currentTerm) {
+      currentTerm = reply.follower_current_term;
+      stepDown(StepDownReason::HigherTerm);
+      return false;
+    } else if (reply.follower_current_term != 0 ||
+               reply.follower_last_log_index != 0) {
+      auto& next = next_index_[peer];
+      next = std::max<uint64_t>(1, std::min(next - 1,
+                                             reply.follower_last_log_index + 1));
+    }
+  }
+
+  std::lock_guard<std::recursive_mutex> lock(mtx_);
+  if (stop_ || !IsLeader()) return false;
+  std::vector<uint64_t> replicated{lastLogIndex};
+  for (auto peer : current_config()) {
+    if (peer == site_id_ || learners().count(peer) != 0) continue;
+    replicated.push_back(match_index_[peer]);
+  }
+  std::sort(replicated.begin(), replicated.end(), std::greater<uint64_t>());
+  const auto quorum = GetQuorumSize();
+  if (replicated.size() >= quorum) {
+    const auto candidate = replicated[quorum - 1];
+    if (candidate > commitIndex && candidate <= lastLogIndex &&
+        GetRaftInstance(candidate)->term == currentTerm) {
+      const auto old_commit = commitIndex;
+      commitIndex = candidate;
+      PersistCommitIndex(commitIndex, "in-memory replication round");
+      EnqueueCommittedEntries(old_commit, commitIndex);
+    }
+  }
+  return true;
+}
+
 // @unsafe - external calls marked @external [safe], core replication loop.
 // ============================================================================
 // PARALLEL HEARTBEAT FIX

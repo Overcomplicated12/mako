@@ -693,36 +693,43 @@ the virtual `LogStorage` / `SnapshotManager` interfaces at
 
 ## Phase 8.5 — `TestCluster` with real `RaftServer`s
 
+Implementation notes: [Phase 8.5 TestCluster plan](dev/raft-phase-8.5-test-cluster-plan.md).
+
 **Goal**: replace `DummyDispatcher` inside `RaftNode` with a real
 `RaftServer` wrapped via `RaftServerDispatcher`. Each node uses
 `ChannelTransportAdapter` pointing at a shared `ChannelSwitchboard`.
 
 - [x] `RaftNode` has a dispatcher-injection constructor and transfers that
   exact move-only `DispatcherProxy` once to its `ChannelNodeWorker`.
-  This is the ownership seam needed by `RaftServerDispatcher`; the default
-  constructor still injects `DummyDispatcher` until real-server bootstrap is
-  complete. Covered by `RaftTestClusterTest.NodeTransfersAnInjectedDispatcher`.
-- [ ] Add a minimal, explicit `RaftServer` test bootstrap. It must configure
+  This is the ownership seam needed by `RaftServerDispatcher`; production-like
+  test nodes now use the real-server constructor, while injection remains only
+  for `RaftTestClusterTest.NodeTransfersAnInjectedDispatcher`.
+- [x] Add a minimal, explicit `RaftServer` test bootstrap. It configures
   site/partition identity, the complete peer set, a supplied
   `ChannelTransportAdapter`, `InMemoryLogStorage`, and
   `MemorySnapshotManager` without reading global `Config`, requiring a
   `Frame`, or starting production persistence/ReplicatedDB setup. Keep this
   separate from `Setup()` so production startup semantics remain unchanged.
-- [ ] Make each `RaftNode` own one real server with that bootstrap, inject
+  Implemented with `RaftServerInMemoryTestDependencies`.
+- [x] Make each `RaftNode` own one real server with that bootstrap, inject
   `make_raft_server_dispatcher(server)` into its worker, and delegate
   `is_leader()`, `current_term()`, and `commit_index()` to the server. Remove
-  the placeholder state fields and the default `DummyDispatcher` only after
-  this path is exercised.
+  the placeholder state fields and default `DummyDispatcher` after this path
+  is exercised.
 - [ ] Define test-server lifecycle explicitly: start only the election,
   heartbeat, and apply machinery that the in-memory reactor can drive; on
   kill/restart, stop/join it before destroying the server, construct a fresh
   server using the retained in-memory storage, then replace its worker
   dispatcher. A stopped worker must never hold a dangling server pointer.
-- [ ] `TestCluster::with_in_memory_transport(n)`: retain the current channel
+  Worker/server teardown and replacement are implemented. The harness uses
+  explicit synchronous election/replication steps and a joinable no-op apply
+  worker instead of the production timer fiber; per-node `PollThread` startup
+  remains before this item can be checked off.
+- [x] `TestCluster::with_in_memory_transport(n)`: retain the current channel
   wiring and per-site storage, but ensure all real servers are initialized
   before the first election tick. Restarting one node must preserve unrelated
   directed drops and partitions.
-- [ ] New gtest cases in `tests/raft_test_cluster_test.cc`:
+- [x] New gtest cases in `tests/raft_test_cluster_test.cc`:
   - Election converges: construct 3-node cluster, step until
     exactly one `node(i).is_leader()` is true.
   - `DoAgreement` equivalent: the leader appends a log entry, every
@@ -730,8 +737,10 @@ the virtual `LogStorage` / `SnapshotManager` interfaces at
   - `disconnect(follower)` prevents the follower from catching up
     until `reset_faults`.
 - [ ] Gate: the above gtests + `raft_lab_standalone` still runs its
-  4 legacy cases.
-- [ ] **Commit**: `raft: phase 8.5 — TestCluster runs real RaftServers`.
+  4 legacy cases. Pending full Clang 22 build: LLVM's C++20-module frontend
+  crashes in rusty-cpp dependency compilation before reaching these targets;
+  see `docs/dev/clang22-mangler-crash.md`.
+- [x] **Commit**: `raft: phase 8.5 — TestCluster runs real RaftServers`.
 
 ### 8.5 risks
 

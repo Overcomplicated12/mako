@@ -1411,6 +1411,19 @@ inline void RaftServerSnapshotProgressCore::set_snapshot_term(uint64_t term) {
 }
 /*RUSTYCPP:GEN-END id=server.10*/
 
+// Every dependency needed by the in-process test harness.  This is purposely
+// distinct from the production constructor/Setup() contract: no Config,
+// Frame, persistence path, or ReplicatedDB is implicit in this value.
+struct RaftServerInMemoryTestDependencies {
+  siteid_t site_id;
+  locid_t loc_id;
+  parid_t partition_id;
+  std::vector<siteid_t> peers;
+  raft::TransportProxy transport;
+  std::shared_ptr<janus::raft::LogStorage> storage;
+  std::shared_ptr<janus::raft::SnapshotManager> snapshots;
+};
+
 // @unsafe - large stateful Raft core. Phase 3 extracted pure election, append,
 // commit, snapshot, and leadership predicates; raw frame/commo pointers,
 // threading/atomics, storage, callbacks, and consensus orchestration remain
@@ -1882,39 +1895,44 @@ class RaftServer : public TxLogServer {
     return transport_.as_mut().unwrap();
   }
 
-  // Test-only bootstrap for the in-process ChannelTransport harness.  This
+  // Test-only bootstrap for the in-process ChannelTransport harness. This
   // deliberately does not call Setup(): production Setup() owns persistence,
-  // Frame/Config discovery, and detached background fibers.  The harness
-  // supplies every dependency it needs explicitly instead.
+  // Frame/Config discovery, and detached timer fibers. The named dependency
+  // value makes the reduced test contract visible at every call site.
   // @unsafe - installs externally owned transport/storage dependencies.
-  void InitializeForInMemoryTest(siteid_t site_id,
-                                 locid_t loc_id,
-                                 parid_t partition_id,
-                                 const std::vector<siteid_t>& peers,
-                                 raft::TransportProxy transport,
-                                 std::shared_ptr<janus::raft::LogStorage> storage,
-                                 std::shared_ptr<janus::raft::SnapshotManager> snapshots) {
-    verify(!peers.empty());
-    verify(std::find(peers.begin(), peers.end(), site_id) != peers.end());
-    site_id_ = site_id;
-    loc_id_ = loc_id;
-    partition_id_ = partition_id;
-    transport_ = rusty::Some(std::move(transport));
-    log_storage_ = std::move(storage);
-    snapshot_manager_ = std::move(snapshots);
+  void InitializeForInMemoryTest(RaftServerInMemoryTestDependencies deps) {
+    verify(!deps.peers.empty());
+    verify(std::find(deps.peers.begin(), deps.peers.end(), deps.site_id) !=
+           deps.peers.end());
+    verify(deps.storage != nullptr);
+    verify(deps.snapshots != nullptr);
+    site_id_ = deps.site_id;
+    loc_id_ = deps.loc_id;
+    partition_id_ = deps.partition_id;
+    transport_ = rusty::Some(std::move(deps.transport));
+    log_storage_ = std::move(deps.storage);
+    snapshot_manager_ = std::move(deps.snapshots);
     current_config().clear();
-    current_config().insert(peers.begin(), peers.end());
+    current_config().insert(deps.peers.begin(), deps.peers.end());
     learners().clear();
     stop_ = false;
     looping_ = true;
     heartbeat_ = false;
     heartbeat_setup_ = true;
     leadership_core_.set_startup_timestamp(Time::now(false));
+    RegLearnerAction([](int, janus::Command) { return 0; });
+    StartApplyThread();
   }
 
   // @unsafe - runs the existing election path synchronously for the
   // in-memory harness. The configured transport and peer set are required.
   bool StartElectionForInMemoryTest() { return RequestVote(); }
+
+  // Runs one deterministic heartbeat/replication round without creating the
+  // production HeartbeatLoop fiber. It uses the same channel transport and
+  // public RPC handlers, so the test harness exercises real append/commit
+  // logic while avoiding RaftCommo/Frame assumptions.
+  bool DriveReplicationOnceForInMemoryTest();
 
   slotid_t min_active_slot_ = 1; // anything before (lt) this slot is freed
   slotid_t max_executed_slot_ = 0;

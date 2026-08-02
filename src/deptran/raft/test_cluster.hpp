@@ -2,16 +2,16 @@
 
 /**
  * @file test_cluster.hpp
- * @brief Phase 6 — in-process raft cluster harness. Wires N RaftNodes
+ * @brief In-process RaftServer cluster harness. Wires N real RaftNodes
  *        together through a ChannelSwitchboard and exposes the fault-
  *        injection controls the lab tests need (kill / restart /
  *        disconnect / partition).
  *
- * Current scope (matches raft_node.hpp): this is a SKELETON. The
- * cluster plumbing — per-node worker threads, transport fan-out, peer
- * discovery — is complete enough for Phase 7 to stand up a test
- * binary. Actual Raft state-machine semantics come online once Phase
- * 6.5 swaps DummyDispatcher for a RaftServer-backed impl.
+ * The harness has an explicit, reduced startup contract: it supplies
+ * identity, membership, channel transport, and in-memory storage to every
+ * RaftServer without using production Setup(), Config, Frame, or ReplicatedDB.
+ * Elections and replication are stepped deterministically by tests; each RPC
+ * still crosses the real channel transport and RaftServerDispatcher boundary.
  */
 
 #include <atomic>
@@ -25,6 +25,7 @@
 #include <rusty/box.hpp>
 
 #include "channel_transport.hpp"
+#include "../classic/tpc_command.h"
 #include "memory_log_storage.hpp"
 #include "memory_snapshot_manager.hpp"
 #include "raft_node.hpp"
@@ -83,24 +84,74 @@ class TestCluster {
   // @safe - clear all fault injections.
   void reset_faults() { sw_.reset_faults(); }
 
-  // @safe - pretends to kill a node by flipping its is_leader /
-  // dispatcher state. A full impl destroys+recreates the node.
-  void kill(siteid_t s) {
-    node(s).force_leader(false);
-    disconnect(s);
+  // @safe - starts an election on the first live node. One explicit step keeps
+  // elections deterministic in tests without starting production timer fibers.
+  bool step_election() {
+    for (size_t i = 0; i < nodes_.size(); ++i) {
+      if (!dead_[i]) return nodes_[i]->server()->StartElectionForInMemoryTest();
+    }
+    return false;
   }
 
-  // @safe - re-attaches a node that was previously killed.
+  // @safe - count the live servers currently reporting leadership.
+  size_t leader_count() const {
+    size_t leaders = 0;
+    for (size_t i = 0; i < nodes_.size(); ++i) {
+      if (!dead_[i] && nodes_[i]->is_leader()) ++leaders;
+    }
+    return leaders;
+  }
+
+  // @safe - append a stateless command through the elected real server.
+  bool append_noop_to_leader(uint64_t* index) {
+    for (size_t i = 0; i < nodes_.size(); ++i) {
+      if (dead_[i] || !nodes_[i]->is_leader()) continue;
+      auto command = rusty::Arc<TpcNoopCommand>::make();
+      janus::Command envelope =
+          janus::Command::pack_aliased<TpcNoopCommand>(std::move(command));
+      uint64_t term = 0;
+      return nodes_[i]->server()->Start(envelope, index, &term);
+    }
+    return false;
+  }
+
+  // @safe - drive one heartbeat/append round on each live server. Only the
+  // leader sends traffic; other calls are no-ops.
+  void step_replication() {
+    for (size_t i = 0; i < nodes_.size(); ++i) {
+      if (!dead_[i]) (void)nodes_[i]->server()->DriveReplicationOnceForInMemoryTest();
+    }
+  }
+
+  // @safe - close and join the worker before its dispatcher can outlive the
+  // server. The server itself is released during restart, after this ordering.
+  void kill(siteid_t s) {
+    const size_t i = index_of(s);
+    if (dead_[i]) return;
+    node(s).force_leader(false);
+    disconnect(s);
+    stop_worker(i);
+    dead_[i] = true;
+  }
+
+  // @safe - construct a fresh server with the retained in-memory storage and
+  // install its dispatcher in a fresh worker. Only faults involving `s` are
+  // removed, preserving unrelated drops and active partitions.
   void restart(siteid_t s) {
+    const size_t i = index_of(s);
+    if (!dead_[i]) return;
     for (auto peer : site_ids_) {
       if (peer == s) continue;
-      // A full impl would rebuild the node in place; the MVP just
-      // clears its direction from the fault list. Since ChannelFaults
-      // lacks a per-direction remove, we reset and re-apply — the
-      // MVP cluster only supports one site being down at a time.
-      (void)peer;
+      sw_.undrop_direction(s, peer);
+      sw_.undrop_direction(peer, s);
     }
-    sw_.reset_faults();
+    auto receiver = sw_.register_site(s);
+    auto retired = node(s).replace_server(make_server(i));
+    retired.reset();
+    workers_[i] = std::make_unique<ChannelNodeWorker>(
+        std::move(receiver), node(s).take_dispatcher());
+    start_worker(i);
+    dead_[i] = false;
   }
 
   // ------------------------------------------------------------------
@@ -147,17 +198,12 @@ class TestCluster {
       snaps_.emplace_back(std::make_shared<MemorySnapshotManager>());
 
       TransportProxy tr = make_channel_transport(&sw_, id, /*par=*/0);
-      auto server = std::make_unique<RaftServer>(nullptr);
-      server->InitializeForInMemoryTest(
-          id, static_cast<locid_t>(id), /*partition=*/0, site_ids_,
-          make_channel_transport(&sw_, id, /*par=*/0), logs_.back(),
-          snaps_.back());
       rusty::Box<RaftNode> node(new RaftNode(
           id, std::move(tr), logs_.back().get(), snaps_.back().get(),
-          std::move(server)));
+          make_server(i)));
 
-      rusty::Box<ChannelNodeWorker> worker(new ChannelNodeWorker(
-          std::move(receivers[i]), node->take_dispatcher()));
+      auto worker = std::make_unique<ChannelNodeWorker>(
+          std::move(receivers[i]), node->take_dispatcher());
 
       nodes_.push_back(std::move(node));
       workers_.push_back(std::move(worker));
@@ -165,12 +211,38 @@ class TestCluster {
 
     // Spawn one background drainer per node.
     // @unsafe { std::thread at test-harness boundary }
-    for (auto& w : workers_) {
-      ChannelNodeWorker* wptr = w.get();
-      worker_threads_.emplace_back(std::thread([wptr]() {
-        while (wptr->step_blocking()) {}
-      }));
+    dead_.assign(n, false);
+    worker_threads_.resize(n);
+    for (size_t i = 0; i < workers_.size(); ++i) start_worker(i);
+  }
+
+  size_t index_of(siteid_t s) const {
+    for (size_t i = 0; i < site_ids_.size(); ++i) {
+      if (site_ids_[i] == s) return i;
     }
+    return site_ids_.size();
+  }
+
+  std::unique_ptr<RaftServer> make_server(size_t i) {
+    auto server = std::make_unique<RaftServer>(nullptr);
+    server->InitializeForInMemoryTest(RaftServerInMemoryTestDependencies{
+        site_ids_[i], static_cast<locid_t>(site_ids_[i]), /*partition=*/0,
+        site_ids_, make_channel_transport(&sw_, site_ids_[i], /*par=*/0),
+        logs_[i], snaps_[i]});
+    return server;
+  }
+
+  void start_worker(size_t i) {
+    ChannelNodeWorker* worker = workers_[i].get();
+    worker_threads_[i] = std::thread([worker]() {
+      while (worker->step_blocking()) {}
+    });
+  }
+
+  void stop_worker(size_t i) {
+    sw_.unregister_site(site_ids_[i]);
+    if (worker_threads_[i].joinable()) worker_threads_[i].join();
+    workers_[i].reset();
   }
 
   // Declaration order matters: members are destroyed in REVERSE order,
@@ -180,8 +252,9 @@ class TestCluster {
   // threads UAF on their receivers.
   std::atomic<bool>                              stop_{false};
   std::vector<std::thread>                       worker_threads_;
-  std::vector<rusty::Box<ChannelNodeWorker>>     workers_;
+  std::vector<std::unique_ptr<ChannelNodeWorker>> workers_;
   std::vector<rusty::Box<RaftNode>>              nodes_;
+  std::vector<bool>                              dead_;
   std::vector<std::shared_ptr<MemorySnapshotManager>> snaps_;
   std::vector<std::shared_ptr<InMemoryLogStorage>>    logs_;
   std::vector<siteid_t>                          site_ids_;

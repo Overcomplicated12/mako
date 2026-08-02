@@ -1,6 +1,6 @@
-// Phase 8.0 smoke test: stand up a 3-node in-memory raft cluster, send
-// some RPCs through it fiber-synchronously, and verify fault injection
-// silences the right traffic.
+// In-process real-RaftServer coverage: stand up a 3-node cluster, send RPCs
+// through ChannelTransportAdapter, and step deterministic election and
+// replication rounds without the production Frame/Config bootstrap.
 //
 // Each node runs a background drainer thread inside TestCluster, so
 // senders just call `transport()->send_x(dst, req)` and receive the
@@ -37,7 +37,7 @@ TEST(RaftTestClusterTest, BuildAndSendAVote) {
   EXPECT_EQ(c->size(), 3u);
   EXPECT_EQ(c->site_ids().size(), 3u);
 
-  // Node 1 votes peer 2; DummyDispatcher replies vote_granted=true.
+  // Node 1 votes peer 2 through the real RaftServerDispatcher.
   auto r = c->node(1).transport()->send_vote(2, VoteReq{1, 0, 1, 1});
   EXPECT_TRUE(r.vote_granted);
 }
@@ -97,4 +97,57 @@ TEST(RaftTestClusterTest, InspectionAccessors) {
   EXPECT_EQ(c->node(1).current_term(), 42u);
   EXPECT_EQ(c->node(1).commit_index(), 10u);
   EXPECT_FALSE(c->node(2).is_leader());
+}
+
+TEST(RaftTestClusterTest, ElectionConvergesOnExactlyOneLeader) {
+  auto c = TestCluster::with_in_memory_transport(3);
+
+  ASSERT_TRUE(c->step_election());
+  EXPECT_EQ(c->leader_count(), 1u);
+}
+
+TEST(RaftTestClusterTest, AgreementAdvancesCommitIndexOnEveryNode) {
+  auto c = TestCluster::with_in_memory_transport(3);
+  ASSERT_TRUE(c->step_election());
+
+  uint64_t index = 0;
+  ASSERT_TRUE(c->append_noop_to_leader(&index));
+  ASSERT_GT(index, 0u);
+
+  // First round replicates the entry and commits it on the leader. The second
+  // conveys the new leader commit index to followers.
+  c->step_replication();
+  c->step_replication();
+  for (auto id : c->site_ids()) {
+    EXPECT_GE(c->node(id).commit_index(), index) << "site " << id;
+  }
+}
+
+TEST(RaftTestClusterTest, DisconnectedFollowerCatchesUpOnlyAfterReset) {
+  auto c = TestCluster::with_in_memory_transport(3);
+  ASSERT_TRUE(c->step_election());
+  c->disconnect(3);
+
+  uint64_t index = 0;
+  ASSERT_TRUE(c->append_noop_to_leader(&index));
+  c->step_replication();
+  c->step_replication();
+  EXPECT_LT(c->node(3).commit_index(), index);
+
+  c->reset_faults();
+  c->step_replication();
+  c->step_replication();
+  EXPECT_GE(c->node(3).commit_index(), index);
+}
+
+TEST(RaftTestClusterTest, RestartPreservesUnrelatedDirectedDrop) {
+  auto c = TestCluster::with_in_memory_transport(3);
+  c->switchboard().drop_direction(1, 3);
+
+  c->kill(2);
+  c->restart(2);
+
+  auto dropped = c->node(1).transport()->send_empty_append_entries(
+      3, EmptyAppendEntriesReq{0, 0, 0, 1, 0, 0, 0, false});
+  EXPECT_EQ(dropped.follower_append_ok, 0u);
 }

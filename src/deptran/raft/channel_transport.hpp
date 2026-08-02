@@ -277,6 +277,16 @@ class ChannelSwitchboard {
     return std::move(rx);
   }
 
+  // @safe - removes one endpoint. Dropping its Sender closes the matching
+  // receiver, which lets a blocking ChannelNodeWorker exit before its
+  // dispatcher (and the server it borrows) is destroyed.
+  void unregister_site(siteid_t s) {
+    senders_.erase(
+        std::remove_if(senders_.begin(), senders_.end(),
+                       [s](const auto& entry) { return entry.first == s; }),
+        senders_.end());
+  }
+
   // @unsafe { pushes into mpsc; drops silently if the dest is gone }
   void send(Envelope env) {
     if (state_core_.is_dropped(env.from, env.to)) return;
