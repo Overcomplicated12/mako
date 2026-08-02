@@ -12,8 +12,10 @@
 #include <rusty/cell.hpp>
 #include <rusty/sync/atomic.hpp>
 #include <rusty/option.hpp>
+#include "log_storage_facade.hpp"
 #include "log_storage.hpp"
 #include "recovery_manager.hpp"
+#include "snapshot_manager_facade.hpp"
 #include "snapshot_manager.hpp"
 #include <rusty/function.hpp>
 
@@ -1435,17 +1437,15 @@ class RaftServer : public TxLogServer {
   // ============================================================================
   // LOG PERSISTENCE
   // ============================================================================
-  // @unsafe - optional shared storage backend. Kept as std::shared_ptr
-  // because storage implementations are polymorphic legacy boundaries.
-  std::shared_ptr<janus::raft::LogStorage> log_storage_;
+  // @unsafe - facade owns the legacy polymorphic storage backend.
+  janus::raft::LogStorageProxy log_storage_;
   bool async_persistence_ = false;  // Runtime: sync (default) vs async disk persistence
 
   // ============================================================================
   // SNAPSHOT SUPPORT
   // ============================================================================
-  // @unsafe - optional shared snapshot backend; polymorphic and file/RocksDB
-  // backed implementations remain outside early DSL migration.
-  std::shared_ptr<janus::raft::SnapshotManager> snapshot_manager_;
+  // @unsafe - facade owns the legacy polymorphic snapshot backend.
+  janus::raft::SnapshotManagerProxy snapshot_manager_;
   RaftServerTuningCore tuning_core_;
 
   // State machine snapshot callbacks (set by ReplicatedDB or other state machines)
@@ -1910,8 +1910,9 @@ class RaftServer : public TxLogServer {
     loc_id_ = deps.loc_id;
     partition_id_ = deps.partition_id;
     transport_ = rusty::Some(std::move(deps.transport));
-    log_storage_ = std::move(deps.storage);
-    snapshot_manager_ = std::move(deps.snapshots);
+    log_storage_ = janus::raft::make_log_storage_proxy(std::move(deps.storage));
+    snapshot_manager_ =
+        janus::raft::make_snapshot_manager_proxy(std::move(deps.snapshots));
     current_config().clear();
     current_config().insert(deps.peers.begin(), deps.peers.end());
     learners().clear();
@@ -2133,7 +2134,7 @@ class RaftServer : public TxLogServer {
    */
   // @unsafe - moves shared_ptr into member field
   void SetLogStorage(std::shared_ptr<janus::raft::LogStorage> storage) {
-    log_storage_ = std::move(storage);
+    log_storage_ = janus::raft::make_log_storage_proxy(std::move(storage));
   }
 
   /**
@@ -2142,7 +2143,7 @@ class RaftServer : public TxLogServer {
    */
   // @unsafe - returns copy of shared_ptr
   std::shared_ptr<janus::raft::LogStorage> GetLogStorage() const {
-    return log_storage_;
+    return log_storage_.backend();
   }
 
   /**
@@ -2181,7 +2182,8 @@ class RaftServer : public TxLogServer {
    */
   // @unsafe - moves shared_ptr into member field
   void SetSnapshotManager(std::shared_ptr<janus::raft::SnapshotManager> manager) {
-    snapshot_manager_ = std::move(manager);
+    snapshot_manager_ =
+        janus::raft::make_snapshot_manager_proxy(std::move(manager));
   }
 
   /**
@@ -2190,7 +2192,7 @@ class RaftServer : public TxLogServer {
    */
   // @unsafe - returns copy of shared_ptr
   std::shared_ptr<janus::raft::SnapshotManager> GetSnapshotManager() const {
-    return snapshot_manager_;
+    return snapshot_manager_.backend();
   }
 
   /**

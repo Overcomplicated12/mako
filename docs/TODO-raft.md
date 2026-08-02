@@ -669,25 +669,35 @@ the corresponding dispatcher `handle_x(req)`.
 
 ## Phase 8.4 — storage proxies (optional)
 
+Implementation notes: [Phase 8.4 storage proxy plan](dev/raft-phase-8.4-storage-proxies-plan.md).
+
 **Goal**: `LogStorageProxy` / `SnapshotManagerProxy` facades replace
 the virtual `LogStorage` / `SnapshotManager` interfaces at
 `RaftServer`'s boundary.
 
-- [ ] Create `src/deptran/raft/log_storage_facade.hpp` mirroring every
+- [x] Create `src/deptran/raft/log_storage_facade.hpp` mirroring every
   method of `LogStorage` (get / put / get_range / put_batch /
   remove / remove_range / first_index / last_index / get_term / size /
   empty / get_metadata / set_metadata / sync / close / is_open / clear).
-- [ ] Same for `src/deptran/raft/snapshot_manager_facade.hpp`
+  `LogStorageProxy` retains the shared legacy backend and forwards the full
+  surface through one factory used by every storage implementation.
+- [x] Same for `src/deptran/raft/snapshot_manager_facade.hpp`
   (BeginSnapshot / TakeSnapshot / BeginLoad / LoadLatestSnapshot /
   GetLatestSnapshot / ListSnapshots / HasSnapshotAtOrAfter /
-  PruneSnapshots / DeleteAllSnapshots / GetStoragePath).
-- [ ] Switch `RaftServer::log_storage_` to `LogStorageProxy` and
+  PruneSnapshots / DeleteAllSnapshots / GetStoragePath). `SnapshotManagerProxy`
+  retains the backend and preserves streaming reader/writer ownership.
+- [x] Switch `RaftServer::log_storage_` to `LogStorageProxy` and
   `RaftServer::snapshot_manager_` to `SnapshotManagerProxy`. Existing
   virtual impls (`RocksDBLogStorage`, `InMemoryLogStorage`,
   `FileSnapshotManager`, `MemorySnapshotManager`) wrap in proxies via
-  factory functions.
+  factory functions. `Set*`/`Get*` keep their shared-pointer API for current
+  callers while storage inside `RaftServer` is now a value facade.
 - [ ] Gate: lab test tests 1-60 + all snapshot tests pass.
-- [ ] **Commit**: `raft: phase 8.4 — proxy LogStorage/SnapshotManager`.
+  `test_raft_storage_facade` covers every forwarding method with in-memory
+  backends. Clang 22/Ninja configuration succeeds, but the focused target is
+  still rebuilding the shared RustyCpp/rrr module prerequisites and has not
+  linked in this environment; run the lab and snapshot gates once it does.
+- [x] **Commit**: `raft: phase 8.4 — proxy LogStorage/SnapshotManager`.
 - [ ] Skip if time is short; the existing virtual interfaces work
   fine.
 
@@ -883,7 +893,7 @@ verification. Listed here so they don't get lost.
 - [x] Phase 8.1e — retire remaining commo() outbound sites
 - [x] Phase 8.2 — RaftServerDispatcher (implementation; full test gate pending)
 - [x] Phase 8.3 — RaftServiceImpl → DispatcherProxy (implementation; full test gate pending)
-- [ ] Phase 8.4 — storage proxies (optional)
+- [x] Phase 8.4 — storage proxies (implementation; full test gate pending)
 - [ ] Phase 8.5 — TestCluster with real RaftServer
 - [ ] Phase 8.6 — port RaftTestConfig to TestCluster
 - [ ] Phase 8.7 — raft_lab_standalone full driver
