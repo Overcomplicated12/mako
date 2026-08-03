@@ -1424,6 +1424,12 @@ struct RaftServerInMemoryTestDependencies {
   raft::TransportProxy transport;
   std::shared_ptr<janus::raft::LogStorage> storage;
   std::shared_ptr<janus::raft::SnapshotManager> snapshots;
+  // The harness drives election/replication explicitly. Production recovery
+  // and leadership-transfer services require a Frame/RaftCommo environment.
+  bool enable_background_leadership_services = false;
+  // Witness GC consults global Config, which is deliberately absent from the
+  // reduced in-memory harness.
+  bool enable_rule_witness_gc = false;
 };
 
 // @unsafe - large stateful Raft core. Phase 3 extracted pure election, append,
@@ -1456,6 +1462,10 @@ class RaftServer : public TxLogServer {
   // Optional replicated DB (created when MAKO_REPLICATED_DB=1 env var is set).
   // @unsafe - shared state-machine adapter that wraps RocksDB C handles.
   std::shared_ptr<ReplicatedDB> replicated_db_;
+  // Production Setup() leaves this enabled. The named in-memory dependencies
+  // disable it because their reduced contract has no Frame or RaftCommo.
+  bool background_leadership_services_enabled_ = true;
+  bool rule_witness_gc_enabled_ = true;
 
   // @unsafe - Initializes snapshot manager from environment config
   void InitializeSnapshotManager();
@@ -1920,6 +1930,9 @@ class RaftServer : public TxLogServer {
     looping_ = true;
     heartbeat_ = false;
     heartbeat_setup_ = true;
+    background_leadership_services_enabled_ =
+        deps.enable_background_leadership_services;
+    rule_witness_gc_enabled_ = deps.enable_rule_witness_gc;
     leadership_core_.set_startup_timestamp(Time::now(false));
     RegLearnerAction([](int, janus::Command) { return 0; });
     StartApplyThread();

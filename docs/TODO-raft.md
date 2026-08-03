@@ -726,15 +726,19 @@ Implementation notes: [Phase 8.5 TestCluster plan](dev/raft-phase-8.5-test-clust
   `is_leader()`, `current_term()`, and `commit_index()` to the server. Remove
   the placeholder state fields and default `DummyDispatcher` after this path
   is exercised.
-- [ ] Define test-server lifecycle explicitly: start only the election,
+- [x] Define test-server lifecycle explicitly: start only the election,
   heartbeat, and apply machinery that the in-memory reactor can drive; on
   kill/restart, stop/join it before destroying the server, construct a fresh
   server using the retained in-memory storage, then replace its worker
   dispatcher. A stopped worker must never hold a dangling server pointer.
-  Worker/server teardown and replacement are implemented. The harness uses
-  explicit synchronous election/replication steps and a joinable no-op apply
-  worker instead of the production timer fiber; per-node `PollThread` startup
-  remains before this item can be checked off.
+  Each node owns an `rrr::PollThread`; deterministic election and replication
+  jobs run on that node's reactor alongside its joinable apply worker. The
+  reduced bootstrap deliberately omits production timer, recovery,
+  leadership-transfer, witness-GC, and state-machine services because they
+  require `Frame`, `RaftCommo`, or global `Config`. `kill()` joins the channel
+  worker and then `PollThread::shutdown()` before `restart()` destroys the old
+  server and installs a replacement. Covered by
+  `RaftTestClusterTest.KillRestartJoinsPollThreadBeforeServerReplacement`.
 - [x] `TestCluster::with_in_memory_transport(n)`: retain the current channel
   wiring and per-site storage, but ensure all real servers are initialized
   before the first election tick. Restarting one node must preserve unrelated
@@ -746,10 +750,9 @@ Implementation notes: [Phase 8.5 TestCluster plan](dev/raft-phase-8.5-test-clust
     node observes the entry's `commit_index()` advance.
   - `disconnect(follower)` prevents the follower from catching up
     until `reset_faults`.
-- [ ] Gate: the above gtests + `raft_lab_standalone` still runs its
-  4 legacy cases. Pending full Clang 22 build: LLVM's C++20-module frontend
-  crashes in rusty-cpp dependency compilation before reaching these targets;
-  see `docs/dev/clang22-mangler-crash.md`.
+- [ ] Gate: `test_raft_test_cluster` passes under the focused Clang 22 build;
+  `raft_lab_standalone` still needs its 4 legacy cases to pass before this
+  combined gate can be checked off.
 - [x] **Commit**: `raft: phase 8.5 — TestCluster runs real RaftServers`.
 
 ### 8.5 risks

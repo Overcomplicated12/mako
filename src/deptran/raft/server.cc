@@ -850,7 +850,7 @@ void RaftServer::StartApplyThread() {
                    site_id_, id, queue_size);
         }
         // @unsafe - callback may have side effects
-        RuleWitnessGC(log_entry);
+        if (rule_witness_gc_enabled_) RuleWitnessGC(log_entry);
         app_next_(id, log_entry);
         if (id >= 470 && id <= 500) {
           Log_info("[APPLY-THREAD] Site {}: DONE APPLYING entry {}", site_id_, id);
@@ -1261,7 +1261,8 @@ void RaftServer::setIsLeader(bool isLeader) {
     // If we just became a non-preferred leader, start monitoring for transfer
     // opportunity. This ensures that after failover/elections, non-preferred
     // leaders will transfer back to preferred leaders when they catch up.
-    if (server_leadership_monitor_should_start(
+    if (background_leadership_services_enabled_ &&
+        server_leadership_monitor_should_start(
             AmIPreferredLeader(), vote_core_.is_leader(), looping_)) {
       Log_info("[LEADERSHIP-TRANSFER] Site {}: Became non-preferred leader, starting transfer monitoring",
                site_id_);
@@ -1390,7 +1391,7 @@ void RaftServer::applyLogs() {
         // RuleWitnessGC takes shared_ptr<Marshallable>;
         // app_next_ takes Command — Command's auto-conversion +
         // explicit unwrap meet at the boundary.
-        RuleWitnessGC(next_instance->log_);
+        if (rule_witness_gc_enabled_) RuleWitnessGC(next_instance->log_);
         Log_info("[APPLY-LOGS] site={} applying index={}", site_id_, id);
         app_next_(id, next_instance->log_);  // Pass both id and log (signature requires 2 args)
         executeIndex = id;
@@ -1449,67 +1450,78 @@ bool RaftServer::DriveReplicationOnceForInMemoryTest() {
   }
 
   for (auto peer : peers) {
-    uint64_t term = 0;
-    uint64_t previous_index = 0;
-    uint64_t previous_term = 0;
-    uint64_t leader_commit = 0;
-    uint64_t entry_term = 0;
-    janus::Command entry{};
-    bool has_entry = false;
+    // A leader may begin ahead of a follower. Retry synchronously here so
+    // one deterministic step catches up the required prefix before testing
+    // the next peer; the bound prevents a malformed reply from spinning.
+    uint64_t retry_limit = 0;
     {
       std::lock_guard<std::recursive_mutex> lock(mtx_);
-      if (stop_ || !IsLeader()) return false;
-      auto& next = next_index_[peer];
-      if (next == 0 || next > lastLogIndex + 1) next = lastLogIndex + 1;
-      previous_index = next - 1;
-      if (previous_index != 0) {
-        previous_term = GetRaftInstance(previous_index)->term;
-      }
-      if (next <= lastLogIndex) {
-        auto instance = GetRaftInstance(next);
-        entry = instance->log_;
-        entry_term = instance->term;
-        has_entry = entry.has_value();
-      }
-      term = currentTerm;
-      leader_commit = commitIndex;
+      retry_limit = lastLogIndex + 1;
     }
+    for (uint64_t attempt = 0; attempt <= retry_limit; ++attempt) {
+      uint64_t term = 0;
+      uint64_t previous_index = 0;
+      uint64_t previous_term = 0;
+      uint64_t leader_commit = 0;
+      uint64_t entry_term = 0;
+      janus::Command entry{};
+      bool has_entry = false;
+      {
+        std::lock_guard<std::recursive_mutex> lock(mtx_);
+        if (stop_ || !IsLeader()) return false;
+        auto& next = next_index_[peer];
+        if (next == 0 || next > lastLogIndex + 1) next = lastLogIndex + 1;
+        previous_index = next - 1;
+        if (previous_index != 0) {
+          previous_term = GetRaftInstance(previous_index)->term;
+        }
+        if (next <= lastLogIndex) {
+          auto instance = GetRaftInstance(next);
+          entry = instance->log_;
+          entry_term = instance->term;
+          has_entry = entry.has_value();
+        }
+        term = currentTerm;
+        leader_commit = commitIndex;
+      }
 
-    raft::AppendEntriesReply reply{};
-    if (has_entry) {
-      reply = transport()->send_append_entries(
-          peer, raft::AppendEntriesReq{static_cast<uint64_t>(-1),
-                                       static_cast<int64_t>(-1), term, site_id_,
-                                       previous_index, previous_term,
-                                       leader_commit, std::move(entry),
-                                       entry_term});
-    } else {
-      auto empty_reply = transport()->send_empty_append_entries(
-          peer, raft::EmptyAppendEntriesReq{static_cast<uint64_t>(-1),
-                                             static_cast<int64_t>(-1), term,
-                                             site_id_, previous_index,
-                                             previous_term, leader_commit,
-                                             false});
-      reply = raft::AppendEntriesReply{empty_reply.follower_append_ok,
-                                       empty_reply.follower_current_term,
-                                       empty_reply.follower_last_log_index,
-                                       empty_reply.follower_ack_type};
-    }
+      raft::AppendEntriesReply reply{};
+      if (has_entry) {
+        reply = transport()->send_append_entries(
+            peer, raft::AppendEntriesReq{static_cast<uint64_t>(-1),
+                                         static_cast<int64_t>(-1), term, site_id_,
+                                         previous_index, previous_term,
+                                         leader_commit, std::move(entry),
+                                         entry_term});
+      } else {
+        auto empty_reply = transport()->send_empty_append_entries(
+            peer, raft::EmptyAppendEntriesReq{static_cast<uint64_t>(-1),
+                                               static_cast<int64_t>(-1), term,
+                                               site_id_, previous_index,
+                                               previous_term, leader_commit,
+                                               false});
+        reply = raft::AppendEntriesReply{empty_reply.follower_append_ok,
+                                         empty_reply.follower_current_term,
+                                         empty_reply.follower_last_log_index,
+                                         empty_reply.follower_ack_type};
+      }
 
-    std::lock_guard<std::recursive_mutex> lock(mtx_);
-    if (stop_ || currentTerm != term || !IsLeader()) continue;
-    if (reply.follower_append_ok != 0) {
-      match_index_[peer] = std::min(reply.follower_last_log_index, lastLogIndex);
-      next_index_[peer] = match_index_[peer] + 1;
-    } else if (reply.follower_current_term > currentTerm) {
-      currentTerm = reply.follower_current_term;
-      stepDown(StepDownReason::HigherTerm);
-      return false;
-    } else if (reply.follower_current_term != 0 ||
-               reply.follower_last_log_index != 0) {
-      auto& next = next_index_[peer];
-      next = std::max<uint64_t>(1, std::min(next - 1,
-                                             reply.follower_last_log_index + 1));
+      std::lock_guard<std::recursive_mutex> lock(mtx_);
+      if (stop_ || currentTerm != term || !IsLeader()) break;
+      if (reply.follower_append_ok != 0) {
+        match_index_[peer] = std::min(reply.follower_last_log_index, lastLogIndex);
+        next_index_[peer] = match_index_[peer] + 1;
+        if (next_index_[peer] > lastLogIndex) break;
+      } else if (reply.follower_current_term > currentTerm) {
+        currentTerm = reply.follower_current_term;
+        stepDown(StepDownReason::HigherTerm);
+        return false;
+      } else if (reply.follower_current_term != 0 ||
+                 reply.follower_last_log_index != 0) {
+        auto& next = next_index_[peer];
+        next = std::max<uint64_t>(1, std::min(next - 1,
+                                               reply.follower_last_log_index + 1));
+      }
     }
   }
 
@@ -2226,7 +2238,7 @@ bool RaftServer::RequestVote() {
 #ifdef RAFT_TEST_CORO
       // Skip JetpackRecovery in test environment to avoid RPC handler issues
 #else
-      if (JetpackRecoveryEnabled()) {
+      if (background_leadership_services_enabled_ && JetpackRecoveryEnabled()) {
         JetpackRecoveryEntry(); // Trigger Jetpack recovery on new leader election
       }
 #endif
@@ -2657,16 +2669,25 @@ void RaftServer::OnAppendEntries(const slotid_t slot_id,
 #endif
 #ifdef RAFT_BATCH_OPTIMIZATION
         const auto cmds = marshallable_cast<TpcBatchCommand>(cmd);
-        verify(cmds.is_some());
-        int cnt = 0;
-        for (const rusty::Arc<TpcCommitCommand>& c: cmds.unwrap()->cmds_) {
-          cnt++;
-          lastLogIndex = leaderPrevLogIndex + cnt;
-          auto instance = GetRaftInstance(lastLogIndex);
-          instance->log_ = c.clone();
-          instance->term = c->term;
+        if (cmds.is_some()) {
+          int cnt = 0;
+          for (const rusty::Arc<TpcCommitCommand>& c: cmds.unwrap()->cmds_) {
+            cnt++;
+            lastLogIndex = leaderPrevLogIndex + cnt;
+            auto instance = GetRaftInstance(lastLogIndex);
+            instance->log_ = c.clone();
+            instance->term = c->term;
 
-          // Capture entry for async persistence
+            // Capture entry for async persistence
+            entries_to_persist.push_back({lastLogIndex, instance});
+          }
+        } else {
+          // The in-memory Raft harness also replicates ordinary commands.
+          // Treat one as a one-entry batch instead of rejecting it.
+          lastLogIndex = leaderPrevLogIndex + 1;
+          auto instance = GetRaftInstance(lastLogIndex);
+          instance->log_ = cmd;
+          instance->term = leaderNextLogTerm;
           entries_to_persist.push_back({lastLogIndex, instance});
         }
         log_index_for_durable_ack = lastLogIndex;  // Highest index in batch

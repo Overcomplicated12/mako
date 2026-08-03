@@ -116,8 +116,8 @@ TEST(RaftTestClusterTest, AgreementAdvancesCommitIndexOnEveryNode) {
 
   // First round replicates the entry and commits it on the leader. The second
   // conveys the new leader commit index to followers.
-  c->step_replication();
-  c->step_replication();
+  ASSERT_TRUE(c->step_replication());
+  ASSERT_TRUE(c->step_replication());
   for (auto id : c->site_ids()) {
     EXPECT_GE(c->node(id).commit_index(), index) << "site " << id;
   }
@@ -130,13 +130,13 @@ TEST(RaftTestClusterTest, DisconnectedFollowerCatchesUpOnlyAfterReset) {
 
   uint64_t index = 0;
   ASSERT_TRUE(c->append_noop_to_leader(&index));
-  c->step_replication();
-  c->step_replication();
+  ASSERT_TRUE(c->step_replication());
+  ASSERT_TRUE(c->step_replication());
   EXPECT_LT(c->node(3).commit_index(), index);
 
   c->reset_faults();
-  c->step_replication();
-  c->step_replication();
+  ASSERT_TRUE(c->step_replication());
+  ASSERT_TRUE(c->step_replication());
   EXPECT_GE(c->node(3).commit_index(), index);
 }
 
@@ -150,4 +150,19 @@ TEST(RaftTestClusterTest, RestartPreservesUnrelatedDirectedDrop) {
   auto dropped = c->node(1).transport()->send_empty_append_entries(
       3, EmptyAppendEntriesReq{0, 0, 0, 1, 0, 0, 0, false});
   EXPECT_EQ(dropped.follower_append_ok, 0u);
+}
+
+TEST(RaftTestClusterTest, KillRestartJoinsPollThreadBeforeServerReplacement) {
+  auto c = TestCluster::with_in_memory_transport(3);
+  const size_t first_generation = c->poll_thread_generation(2);
+  ASSERT_TRUE(c->has_live_poll_thread(2));
+
+  c->kill(2);
+  EXPECT_FALSE(c->has_live_poll_thread(2));
+  EXPECT_EQ(c->poll_thread_join_count(), 1u);
+
+  c->restart(2);
+  EXPECT_TRUE(c->has_live_poll_thread(2));
+  EXPECT_EQ(c->poll_thread_generation(2), first_generation + 1);
+  EXPECT_NE(c->node(2).server(), nullptr);
 }

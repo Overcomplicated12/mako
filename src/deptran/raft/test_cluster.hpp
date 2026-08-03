@@ -10,12 +10,15 @@
  * The harness has an explicit, reduced startup contract: it supplies
  * identity, membership, channel transport, and in-memory storage to every
  * RaftServer without using production Setup(), Config, Frame, or ReplicatedDB.
- * Elections and replication are stepped deterministically by tests; each RPC
- * still crosses the real channel transport and RaftServerDispatcher boundary.
+ * Elections and replication are stepped deterministically by tests on the
+ * owning per-node PollThread; each RPC still crosses the real channel
+ * transport and RaftServerDispatcher boundary.
  */
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <thread>
 #include <utility>
@@ -23,6 +26,7 @@
 
 #include <rusty/arc.hpp>
 #include <rusty/box.hpp>
+#include <rusty/option.hpp>
 
 #include "channel_transport.hpp"
 #include "../classic/tpc_command.h"
@@ -31,6 +35,7 @@
 #include "raft_node.hpp"
 
 #include "../constants.h"
+#include "rrr/rrr.hpp"
 
 namespace janus {
 namespace raft {
@@ -61,6 +66,15 @@ class TestCluster {
   // @safe - returns the full site-id list.
   const std::vector<siteid_t>& site_ids() const { return site_ids_; }
 
+  // @safe - lifecycle inspection for the in-memory reactor owned by a node.
+  bool has_live_poll_thread(siteid_t s) const {
+    return poll_threads_[index_of(s)].is_some();
+  }
+  size_t poll_thread_generation(siteid_t s) const {
+    return poll_thread_generations_[index_of(s)];
+  }
+  size_t poll_thread_join_count() const { return poll_thread_join_count_; }
+
   // ------------------------------------------------------------------
   // Fault injection
   // ------------------------------------------------------------------
@@ -84,11 +98,20 @@ class TestCluster {
   // @safe - clear all fault injections.
   void reset_faults() { sw_.reset_faults(); }
 
-  // @safe - starts an election on the first live node. One explicit step keeps
-  // elections deterministic in tests without starting production timer fibers.
+  // @safe - starts an election on the first live node's PollThread. One
+  // explicit reactor job keeps elections deterministic without enabling the
+  // production timer fiber, which requires RaftCommo/Frame state.
   bool step_election() {
     for (size_t i = 0; i < nodes_.size(); ++i) {
-      if (!dead_[i]) return nodes_[i]->server()->StartElectionForInMemoryTest();
+      if (dead_[i]) continue;
+      auto result = std::make_shared<std::atomic<bool>>(false);
+      if (!run_on_poll_thread(i, [server = nodes_[i]->server(), result]() {
+            result->store(server->StartElectionForInMemoryTest(),
+                          std::memory_order_release);
+          })) {
+        return false;
+      }
+      return result->load(std::memory_order_acquire);
     }
     return false;
   }
@@ -102,25 +125,50 @@ class TestCluster {
     return leaders;
   }
 
-  // @safe - append a stateless command through the elected real server.
+  // @safe - append the smallest well-formed classic commit through the elected
+  // real server. The apply path expects a TpcCommitCommand, even when the
+  // test does not attach application work to it.
   bool append_noop_to_leader(uint64_t* index) {
     for (size_t i = 0; i < nodes_.size(); ++i) {
       if (dead_[i] || !nodes_[i]->is_leader()) continue;
-      auto command = rusty::Arc<TpcNoopCommand>::make();
-      janus::Command envelope =
-          janus::Command::pack_aliased<TpcNoopCommand>(std::move(command));
-      uint64_t term = 0;
-      return nodes_[i]->server()->Start(envelope, index, &term);
+      auto command = rusty::Arc<TpcCommitCommand>::make();
+      auto pieces = rusty::Arc<VecPieceData>::make();
+      pieces.get_mut().unwrap().sp_vec_piece_data_ =
+          std::make_shared<vector<shared_ptr<SimpleCommand>>>();
+      command.get_mut().unwrap().cmd_ = std::move(pieces);
+      auto envelope = std::make_shared<janus::Command>(
+          janus::Command::pack_aliased<TpcCommitCommand>(std::move(command)));
+      struct AppendResult {
+        bool started = false;
+        uint64_t index = 0;
+        uint64_t term = 0;
+      };
+      auto result = std::make_shared<AppendResult>();
+      if (!run_on_poll_thread(i, [server = nodes_[i]->server(), envelope,
+                                   result]() {
+            result->started = server->Start(*envelope, &result->index,
+                                            &result->term);
+          })) {
+        return false;
+      }
+      if (result->started) *index = result->index;
+      return result->started;
     }
     return false;
   }
 
-  // @safe - drive one heartbeat/append round on each live server. Only the
-  // leader sends traffic; other calls are no-ops.
-  void step_replication() {
+  // @safe - drive one heartbeat/append round on every live node's PollThread.
+  // Only the leader sends traffic; other calls are no-ops.
+  bool step_replication() {
     for (size_t i = 0; i < nodes_.size(); ++i) {
-      if (!dead_[i]) (void)nodes_[i]->server()->DriveReplicationOnceForInMemoryTest();
+      if (dead_[i]) continue;
+      if (!run_on_poll_thread(i, [server = nodes_[i]->server()]() {
+            (void)server->DriveReplicationOnceForInMemoryTest();
+          })) {
+        return false;
+      }
     }
+    return true;
   }
 
   // @safe - close and join the worker before its dispatcher can outlive the
@@ -128,9 +176,12 @@ class TestCluster {
   void kill(siteid_t s) {
     const size_t i = index_of(s);
     if (dead_[i]) return;
-    node(s).force_leader(false);
     disconnect(s);
     stop_worker(i);
+    verify(run_on_poll_thread(i, [server = node(s).server()]() {
+      server->setIsLeader(false);
+    }));
+    stop_poll_thread(i);
     dead_[i] = true;
   }
 
@@ -147,7 +198,10 @@ class TestCluster {
     }
     auto receiver = sw_.register_site(s);
     auto retired = node(s).replace_server(make_server(i));
+    // The old PollThread was synchronously shut down in kill(), so no fiber
+    // or reactor job can retain its server before this destruction point.
     retired.reset();
+    start_poll_thread(i);
     workers_[i] = std::make_unique<ChannelNodeWorker>(
         std::move(receiver), node(s).take_dispatcher());
     start_worker(i);
@@ -168,6 +222,9 @@ class TestCluster {
     sw_ = ChannelSwitchboard{};  // move-assign empty; drops all senders
     for (auto& t : worker_threads_) {
       if (t.joinable()) t.join();
+    }
+    for (size_t i = 0; i < poll_threads_.size(); ++i) {
+      stop_poll_thread(i);
     }
     // Dispatchers borrow their RaftServer from RaftNode.  Dispose workers
     // first so no dispatcher survives the server it targets.
@@ -209,11 +266,18 @@ class TestCluster {
       workers_.push_back(std::move(worker));
     }
 
-    // Spawn one background drainer per node.
+    // Start one reactor and one channel drainer per node only after every
+    // real server is initialized, so no election/replication step can see a
+    // partially bootstrapped peer set.
     // @unsafe { std::thread at test-harness boundary }
     dead_.assign(n, false);
     worker_threads_.resize(n);
-    for (size_t i = 0; i < workers_.size(); ++i) start_worker(i);
+    poll_threads_.resize(n);
+    poll_thread_generations_.assign(n, 0);
+    for (size_t i = 0; i < workers_.size(); ++i) {
+      start_poll_thread(i);
+      start_worker(i);
+    }
   }
 
   size_t index_of(siteid_t s) const {
@@ -245,6 +309,47 @@ class TestCluster {
     workers_[i].reset();
   }
 
+  void start_poll_thread(size_t i) {
+    verify(poll_threads_[i].is_none());
+    poll_threads_[i] = rusty::Some(rrr::PollThread::create());
+    ++poll_thread_generations_[i];
+  }
+
+  // PollThread::shutdown sends CmdShutdown and joins synchronously. It must
+  // finish before a server can be replaced or destroyed because its reactor
+  // jobs and fibers borrow that server.
+  void stop_poll_thread(size_t i) {
+    if (poll_threads_[i].is_none()) return;
+    poll_threads_[i].as_ref().unwrap()->shutdown();
+    poll_threads_[i] = rusty::None;
+    ++poll_thread_join_count_;
+  }
+
+  // Schedule one deterministic Raft action on a node's reactor and wait for
+  // it to finish. The job owns its callback/completion state, so a timeout
+  // cannot leave a dangling reference behind.
+  bool run_on_poll_thread(size_t i, std::function<void()> action) {
+    verify(poll_threads_[i].is_some());
+    struct Completion {
+      std::atomic<bool> done{false};
+    };
+    auto completion = std::make_shared<Completion>();
+    auto job = rusty::Arc<rrr::OneTimeJob>::new_(rrr::OneTimeJob::new_(
+        [action = std::move(action), completion]() mutable {
+          action();
+          completion->done.store(true, std::memory_order_release);
+        }));
+    poll_threads_[i].as_ref().unwrap()->add(rusty::Arc<rrr::Job>(job));
+
+    const auto deadline = std::chrono::steady_clock::now() +
+                          std::chrono::seconds(2);
+    while (!completion->done.load(std::memory_order_acquire)) {
+      if (std::chrono::steady_clock::now() >= deadline) return false;
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return true;
+  }
+
   // Declaration order matters: members are destroyed in REVERSE order,
   // so sw_ must come LAST (destroyed first) to drop its Senders and
   // let every worker's step_blocking() recv() return Err before the
@@ -252,6 +357,9 @@ class TestCluster {
   // threads UAF on their receivers.
   std::atomic<bool>                              stop_{false};
   std::vector<std::thread>                       worker_threads_;
+  std::vector<rusty::Option<rusty::Arc<rrr::PollThread>>> poll_threads_;
+  std::vector<size_t>                            poll_thread_generations_;
+  size_t                                          poll_thread_join_count_{0};
   std::vector<std::unique_ptr<ChannelNodeWorker>> workers_;
   std::vector<rusty::Box<RaftNode>>              nodes_;
   std::vector<bool>                              dead_;
