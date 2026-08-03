@@ -310,12 +310,14 @@ class ChannelSwitchboard {
   // drops and any active partition fault.
   void undrop_direction(siteid_t from, siteid_t to) {
     auto& dropped = state_core_.faults_mut().dropped;
-    dropped.erase(
-        std::remove_if(dropped.begin(), dropped.end(),
-                       [from, to](const auto& fault) {
-                         return fault.first == from && fault.second == to;
-                       }),
-        dropped.end());
+    for (size_t i = 0; i < dropped.size();) {
+      const auto& fault = dropped[i];
+      if (fault.first == from && fault.second == to) {
+        dropped.remove(i);
+      } else {
+        ++i;
+      }
+    }
   }
   void partition(std::vector<std::vector<siteid_t>> groups) {
     auto partitions = rusty::Vec<rusty::Vec<siteid_t>>::new_();
