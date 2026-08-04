@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 
 #include "deptran/raft/test_cluster.hpp"
+#include "deptran/raft/test.h"
 
 using namespace janus::raft;
 
@@ -166,3 +167,14 @@ TEST(RaftTestClusterTest, KillRestartJoinsPollThreadBeforeServerReplacement) {
   EXPECT_EQ(c->poll_thread_generation(2), first_generation + 1);
   EXPECT_NE(c->node(2).server(), nullptr);
 }
+
+#ifdef RAFT_TEST_CORO
+TEST(RaftTestClusterTest, LabSubsetRunsThroughTestCluster) {
+  auto cluster = TestCluster::with_in_memory_transport(5);
+  janus::RaftTestConfig config(*cluster);
+  janus::RaftLabTest lab(&config);
+
+  EXPECT_EQ(lab.RunPhase86Subset(), 0);
+  lab.Cleanup();
+}
+#endif

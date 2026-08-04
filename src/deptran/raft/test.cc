@@ -240,6 +240,14 @@ int RaftLabTest::Run(void) {
   return 0;
 }
 
+int RaftLabTest::RunPhase86Subset(void) {
+  config_->SetLearnerAction();
+  return testInitialElection() || testReElection() || testBasicAgree() ||
+                 testFailAgree()
+             ? 1
+             : 0;
+}
+
 void RaftLabTest::Cleanup(void) {
   config_->Shutdown();
 }
@@ -1246,7 +1254,7 @@ int RaftLabTest::testInitialElection(void) {
   // }
   
   // Wait a bit for election timers to start and elections to begin
-  Fiber::sleep(ELECTIONTIMEOUT / 10);
+  config_->WaitForProgress(ELECTIONTIMEOUT / 10);
   
   // Initial election: is there one leader?
   int leader = config_->OneLeader();
@@ -1305,7 +1313,7 @@ int RaftLabTest::testReElection(void) {
   config_->Disconnect(leader);
   int oldLeader = leader;
   // Log_info("TEST 2: Old leader {} disconnected, sleeping for election timeout", oldLeader);
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   
   // Log_info("TEST 2: Finding new leader after old leader disconnected");
   leader = config_->OneLeader();
@@ -1325,7 +1333,7 @@ int RaftLabTest::testReElection(void) {
   // Log_info("TEST 2: Reconnecting old leader {}", oldLeader);
   config_->Reconnect(oldLeader);
   // Log_info("TEST 2: Old leader reconnected, sleeping for election timeout");
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   AssertOneLeader(config_->OneLeader(leader));
   
   // no quorum -> no leader
@@ -1351,7 +1359,7 @@ int RaftLabTest::testReElection(void) {
   siteid_t reconnect_server = config_->getNextServerId(leader, 2);
   // Log_info("TEST 2: Reconnecting server {}", reconnect_server);
   config_->Reconnect(reconnect_server);
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   AssertOneLeader(config_->OneLeader());
   
   // rejoin all servers
@@ -1362,7 +1370,7 @@ int RaftLabTest::testReElection(void) {
   
   // Log_info("TEST 2: Rejoining leader {}", leader);
   config_->Reconnect(leader);
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   AssertOneLeader(config_->OneLeader());
   
   // Log carryover context after test 2
@@ -1422,14 +1430,14 @@ int RaftLabTest::testFailAgree(void) {
   Log_debug("try commit a few commands after disconnect");
   DoAgreeAndAssertIndex(401, NSERVERS - 2, index_++);
   DoAgreeAndAssertIndex(402, NSERVERS - 2, index_++);
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   DoAgreeAndAssertIndex(403, NSERVERS - 2, index_++);
   DoAgreeAndAssertIndex(404, NSERVERS - 2, index_++);
   // reconnect followers
   Log_debug("reconnect servers");
   config_->Reconnect(config_->getNextServerId(leader, 1));
   config_->Reconnect(config_->getNextServerId(leader, 2));
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   Log_debug("try commit a few commands after reconnect");
   DoAgreeAndAssertWaitSuccess(405, NSERVERS);
   DoAgreeAndAssertWaitSuccess(406, NSERVERS);

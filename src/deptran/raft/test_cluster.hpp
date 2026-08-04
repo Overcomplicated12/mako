@@ -29,6 +29,7 @@
 #include <rusty/option.hpp>
 
 #include "channel_transport.hpp"
+#include "test_cluster_facade.hpp"
 #include "../classic/tpc_command.h"
 #include "memory_log_storage.hpp"
 #include "memory_snapshot_manager.hpp"
@@ -40,7 +41,7 @@
 namespace janus {
 namespace raft {
 
-class TestCluster {
+class TestCluster : public TestClusterFacade {
  public:
   // @safe - builds an N-site cluster wired through an internal
   // ChannelSwitchboard. Each site gets its own InMemoryLogStorage +
@@ -53,7 +54,7 @@ class TestCluster {
   }
 
   // @safe - accessors
-  size_t size() const { return nodes_.size(); }
+  size_t size() const override { return nodes_.size(); }
   RaftNode& node(siteid_t id) {
     for (auto& n : nodes_) {
       if (n->id() == id) return *n;
@@ -64,7 +65,23 @@ class TestCluster {
   ChannelSwitchboard& switchboard() { return sw_; }
 
   // @safe - returns the full site-id list.
-  const std::vector<siteid_t>& site_ids() const { return site_ids_; }
+  const std::vector<siteid_t>& site_ids() const override { return site_ids_; }
+  RaftServer* node_server(siteid_t site) override {
+    const size_t i = index_of(site);
+    return i == nodes_.size() ? nullptr : nodes_[i]->server();
+  }
+  bool node_is_leader(siteid_t site) const override {
+    const size_t i = index_of(site);
+    return i != nodes_.size() && !dead_[i] && nodes_[i]->is_leader();
+  }
+  uint64_t node_current_term(siteid_t site) const override {
+    const size_t i = index_of(site);
+    return i == nodes_.size() || dead_[i] ? 0 : nodes_[i]->current_term();
+  }
+  uint64_t node_commit_index(siteid_t site) const override {
+    const size_t i = index_of(site);
+    return i == nodes_.size() || dead_[i] ? 0 : nodes_[i]->commit_index();
+  }
 
   // @safe - lifecycle inspection for the in-memory reactor owned by a node.
   bool has_live_poll_thread(siteid_t s) const {
@@ -80,7 +97,7 @@ class TestCluster {
   // ------------------------------------------------------------------
 
   // @safe - stops all traffic from `s` to every peer and vice versa.
-  void disconnect(siteid_t s) {
+  void disconnect(siteid_t s) override {
     for (auto peer : site_ids_) {
       if (peer == s) continue;
       sw_.drop_direction(s, peer);
@@ -88,22 +105,33 @@ class TestCluster {
     }
   }
 
+  // @safe - restores only traffic involving `s`; unrelated directed drops and
+  // active partitions remain installed on the switchboard.
+  void reconnect(siteid_t s) override {
+    for (auto peer : site_ids_) {
+      if (peer == s) continue;
+      sw_.undrop_direction(s, peer);
+      sw_.undrop_direction(peer, s);
+    }
+  }
+
   // @safe - splits sites into two groups that cannot exchange
   // messages across the boundary. Sites outside both groups remain
   // fully connected (via current switchboard semantics).
-  void partition(std::vector<siteid_t> a, std::vector<siteid_t> b) {
+  void partition(std::vector<siteid_t> a, std::vector<siteid_t> b) override {
     sw_.partition({std::move(a), std::move(b)});
   }
 
   // @safe - clear all fault injections.
-  void reset_faults() { sw_.reset_faults(); }
+  void reset_faults() override { sw_.reset_faults(); }
 
   // @safe - starts an election on the first live node's PollThread. One
   // explicit reactor job keeps elections deterministic without enabling the
   // production timer fiber, which requires RaftCommo/Frame state.
-  bool step_election() {
+  bool step_election(siteid_t candidate = 0) override {
     for (size_t i = 0; i < nodes_.size(); ++i) {
       if (dead_[i]) continue;
+      if (candidate != 0 && nodes_[i]->id() != candidate) continue;
       auto result = std::make_shared<std::atomic<bool>>(false);
       if (!run_on_poll_thread(i, [server = nodes_[i]->server(), result]() {
             result->store(server->StartElectionForInMemoryTest(),
@@ -125,41 +153,56 @@ class TestCluster {
     return leaders;
   }
 
+  // @safe - append a well-formed classic commit through a specific real
+  // server. It returns false when that node is dead or not the leader.
+  bool append_command(siteid_t site, int command_id, uint64_t* index,
+                      uint64_t* term = nullptr) override {
+    const size_t i = index_of(site);
+    if (i == nodes_.size() || dead_[i]) return false;
+    auto command = rusty::Arc<TpcCommitCommand>::make();
+    auto pieces = rusty::Arc<VecPieceData>::make();
+    pieces.get_mut().unwrap().sp_vec_piece_data_ =
+        std::make_shared<vector<shared_ptr<SimpleCommand>>>();
+    {
+      auto& mutable_command = command.get_mut().unwrap();
+      mutable_command.tx_id_ = command_id;
+      mutable_command.cmd_ = std::move(pieces);
+    }
+    auto envelope = std::make_shared<janus::Command>(
+        janus::Command::pack_aliased<TpcCommitCommand>(std::move(command)));
+    struct AppendResult {
+      bool started = false;
+      uint64_t index = 0;
+      uint64_t term = 0;
+    };
+    auto result = std::make_shared<AppendResult>();
+    if (!run_on_poll_thread(i, [server = nodes_[i]->server(), envelope,
+                                 result]() {
+          result->started = server->Start(*envelope, &result->index,
+                                          &result->term);
+        })) {
+      return false;
+    }
+    if (!result->started) return false;
+    *index = result->index;
+    if (term != nullptr) *term = result->term;
+    return true;
+  }
+
   // @safe - append the smallest well-formed classic commit through the elected
   // real server. The apply path expects a TpcCommitCommand, even when the
   // test does not attach application work to it.
   bool append_noop_to_leader(uint64_t* index) {
     for (size_t i = 0; i < nodes_.size(); ++i) {
       if (dead_[i] || !nodes_[i]->is_leader()) continue;
-      auto command = rusty::Arc<TpcCommitCommand>::make();
-      auto pieces = rusty::Arc<VecPieceData>::make();
-      pieces.get_mut().unwrap().sp_vec_piece_data_ =
-          std::make_shared<vector<shared_ptr<SimpleCommand>>>();
-      command.get_mut().unwrap().cmd_ = std::move(pieces);
-      auto envelope = std::make_shared<janus::Command>(
-          janus::Command::pack_aliased<TpcCommitCommand>(std::move(command)));
-      struct AppendResult {
-        bool started = false;
-        uint64_t index = 0;
-        uint64_t term = 0;
-      };
-      auto result = std::make_shared<AppendResult>();
-      if (!run_on_poll_thread(i, [server = nodes_[i]->server(), envelope,
-                                   result]() {
-            result->started = server->Start(*envelope, &result->index,
-                                            &result->term);
-          })) {
-        return false;
-      }
-      if (result->started) *index = result->index;
-      return result->started;
+      return append_command(nodes_[i]->id(), /*command_id=*/0, index);
     }
     return false;
   }
 
   // @safe - drive one heartbeat/append round on every live node's PollThread.
   // Only the leader sends traffic; other calls are no-ops.
-  bool step_replication() {
+  bool step_replication() override {
     for (size_t i = 0; i < nodes_.size(); ++i) {
       if (dead_[i]) continue;
       if (!run_on_poll_thread(i, [server = nodes_[i]->server()]() {
@@ -173,7 +216,7 @@ class TestCluster {
 
   // @safe - close and join the worker before its dispatcher can outlive the
   // server. The server itself is released during restart, after this ordering.
-  void kill(siteid_t s) {
+  void kill(siteid_t s) override {
     const size_t i = index_of(s);
     if (dead_[i]) return;
     disconnect(s);
@@ -182,13 +225,16 @@ class TestCluster {
       server->setIsLeader(false);
     }));
     stop_poll_thread(i);
+    // No worker or reactor job can now retain the server, so Kill has the
+    // same destroy-now contract as the production lab harness.
+    node(s).release_server().reset();
     dead_[i] = true;
   }
 
   // @safe - construct a fresh server with the retained in-memory storage and
   // install its dispatcher in a fresh worker. Only faults involving `s` are
   // removed, preserving unrelated drops and active partitions.
-  void restart(siteid_t s) {
+  void restart(siteid_t s) override {
     const size_t i = index_of(s);
     if (!dead_[i]) return;
     for (auto peer : site_ids_) {
@@ -197,10 +243,7 @@ class TestCluster {
       sw_.undrop_direction(peer, s);
     }
     auto receiver = sw_.register_site(s);
-    auto retired = node(s).replace_server(make_server(i));
-    // The old PollThread was synchronously shut down in kill(), so no fiber
-    // or reactor job can retain its server before this destruction point.
-    retired.reset();
+    node(s).replace_server(make_server(i));
     start_poll_thread(i);
     workers_[i] = std::make_unique<ChannelNodeWorker>(
         std::move(receiver), node(s).take_dispatcher());
@@ -371,3 +414,15 @@ class TestCluster {
 
 }  // namespace raft
 }  // namespace janus
+
+#ifdef RAFT_TEST_CORO
+#include "testconf.h"
+
+inline janus::RaftTestConfig::RaftTestConfig(
+    janus::raft::TestCluster& cluster)
+    : cluster_(&cluster) {
+  for (auto site : cluster_->site_ids()) {
+    disconnected_[site] = false;
+  }
+}
+#endif

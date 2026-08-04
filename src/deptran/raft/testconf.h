@@ -2,10 +2,15 @@
 
 #include "frame.h"
 #include "coordinator.h"
+#include "test_cluster_facade.hpp"
 #include <map>
 #include <rusty/function.hpp>
 
 namespace janus {
+
+namespace raft {
+class TestCluster;
+}
 
 #ifdef RAFT_TEST_CORO
 
@@ -48,6 +53,12 @@ class RaftTestConfig {
   static std::map<siteid_t, std::vector<int>> committed_cmds;
   static std::map<siteid_t, uint64_t> rpc_count_last;
 
+  // Borrowed cluster-only backend. A non-null value selects the in-memory
+  // real-server path; the Frame registry remains exclusively for production
+  // `deptran_server -f raft_lab_test.yml` tests.
+  raft::TestClusterFacade* cluster_ = nullptr;
+  std::map<siteid_t, uint64_t> cluster_committed_commands_;
+
   // disconnected_[svr] true if svr is disconnected by Disconnect()/Reconnect()
   std::map<siteid_t, bool> disconnected_;
   // @unsafe - test-only network control thread synchronization.
@@ -71,6 +82,7 @@ class RaftTestConfig {
   // The registry becomes responsible for Kill()/Restart() replacement during
   // the test config lifetime.
   RaftTestConfig(std::map<siteid_t, RaftFrame*>& replicas);
+  RaftTestConfig(raft::TestCluster& cluster);
 
   // sets up learner action functions for the servers
   // so that each committed command on each server is
@@ -114,6 +126,11 @@ class RaftTestConfig {
   // -3 if committed values for index differ
   int Wait(uint64_t index, int n, uint64_t term);
 
+  // Advances the backend enough for a lab test's election/heartbeat wait.
+  // Frame-backed tests retain Fiber::sleep; TestCluster uses synchronous
+  // replication because its reduced bootstrap has no production timer fiber.
+  void WaitForProgress(uint64_t usecs);
+
   // Does one agreement.
   // Submits a command with value cmd to the leader
   // Waits at most 2 seconds until n servers commit the command.
@@ -127,6 +144,10 @@ class RaftTestConfig {
 
   // Reconnects disconnected server
   void Reconnect(siteid_t svr);
+
+  // Splits the supplied groups at the TestCluster switchboard. The Frame
+  // backend has no equivalent direct fault primitive.
+  void Partition(std::vector<siteid_t> a, std::vector<siteid_t> b);
 
   // Kills server (destroys it completely, clearing all in-memory state)
   void Kill(siteid_t svr);

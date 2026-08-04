@@ -776,36 +776,34 @@ Implementation notes: [Phase 8.5 TestCluster plan](dev/raft-phase-8.5-test-clust
 **Goal**: `RaftTestConfig` can operate on a `TestCluster` instead of
 on the 5-server deptran topology.
 
-- [ ] `src/deptran/raft/testconf.h`: add a new constructor
+- [x] `src/deptran/raft/testconf.h`: add
   `RaftTestConfig(TestCluster& cluster)` alongside the existing
-  `RaftTestConfig(std::vector<Frame*>)`.
-- [ ] `src/deptran/raft/testconf.cc`: when constructed from a
+  Frame-map constructor. `test_cluster_facade.hpp` keeps the header-only
+  TestCluster out of `testconf.cc`, avoiding duplicate generated snapshot
+  symbols at link time.
+- [x] `src/deptran/raft/testconf.cc`: when constructed from a
   TestCluster, route every operation:
-  - `Kill(i)` → destroy `nodes_[i]`'s RaftServer, switchboard drops
-    its outbound by default.
-  - `Restart(i)` → rebuild the server in place, re-register its
-    dispatcher.
-  - `Disconnect(i)` → `sw_.drop_direction(i, *)` +
-    `sw_.drop_direction(*, i)`.
-  - `Reconnect(i)` → per-direction undrop (small switchboard API
-    addition: `undrop_direction(from, to)` or rebuild faults minus
-    this one).
-  - `Partition(a, b)` → `sw_.partition({a, b})`.
-  - `DoAgreement(cmd, n, wait)` → call the leader's log-append path
-    (see `RaftServer::Submit` or equivalent), poll `commit_index()`
-    across nodes.
-  - `OneLeader()` → scan nodes for `is_leader()`.
-- [ ] Keep the existing rrr-based `RaftTestConfig(std::vector<Frame*>)`
-  constructor intact so `deptran_server -f raft_lab_test.yml` keeps
+  - `Kill` stops worker/reactor and destroys the node server; `Restart`
+    builds a replacement and a fresh dispatcher.
+  - `Disconnect`, `Reconnect`, and `Partition` use the switchboard's directed
+    fault API.
+  - `DoAgreement` submits a well-formed `TpcCommitCommand` to the elected
+    real server and polls `commit_index()` through deterministic replication.
+  - `OneLeader` scans real node state and explicitly synchronizes a
+    reconnected former leader before declaring the cluster stable.
+- [x] Keep the existing rrr-based Frame-map constructor intact so
+  `deptran_server -f raft_lab_test.yml` keeps
   working.
 - [x] Switchboard API addition in `src/deptran/raft/channel_transport.hpp`:
   `undrop_direction(siteid_t from, siteid_t to)` removes only that directed
   drop while preserving reverse-direction and partition faults. Covered by
   `RaftChannelTransportTest.UndropRestoresOnlyTheSelectedDirection`.
-- [ ] Gate: subset of `RaftLabTest` runs against the new
+- [x] Gate: subset of `RaftLabTest` runs against the new
   constructor (see 8.7 for the full driver). Minimally: `testInitialElection`,
-  `testReElection`, `testBasicAgree`, `testFailAgree`.
-- [ ] **Commit**: `raft: phase 8.6 — port RaftTestConfig to TestCluster`.
+  `testReElection`, `testBasicAgree`, `testFailAgree`. Verified 2026-08-03
+  with Clang 22, `RAFT_TEST=ON`, and `ctest --test-dir build -R
+  '^(test_raft_test_cluster|raft_lab_standalone)$'`.
+- [x] **Commit**: `raft: phase 8.6 — port RaftTestConfig to TestCluster`.
 
 ## Phase 8.7 — `raft_lab_standalone` runs the full `RaftLabTest::Run()`
 
@@ -898,6 +896,6 @@ verification. Listed here so they don't get lost.
 - [x] Phase 8.3 — RaftServiceImpl → DispatcherProxy (implementation; full test gate pending)
 - [x] Phase 8.4 — storage proxies (implementation; full test gate pending)
 - [x] Phase 8.5 — TestCluster with real RaftServer
-- [ ] Phase 8.6 — port RaftTestConfig to TestCluster
+- [x] Phase 8.6 — port RaftTestConfig to TestCluster
 - [ ] Phase 8.7 — raft_lab_standalone full driver
 - [ ] Phase 8.8 — RaftClock (deferred)

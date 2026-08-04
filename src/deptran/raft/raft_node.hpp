@@ -340,6 +340,10 @@ class RaftNode {
     return old;
   }
 
+  // @unsafe - the caller must first stop the worker and join the node's
+  // PollThread. This is the terminal half of the TestCluster kill lifecycle.
+  std::unique_ptr<RaftServer> release_server() { return std::move(server_); }
+
   // @safe - borrow the transport for sending RPCs
   TransportProxy& transport() { return transport_; }
 
