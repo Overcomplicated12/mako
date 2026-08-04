@@ -750,9 +750,9 @@ Implementation notes: [Phase 8.5 TestCluster plan](dev/raft-phase-8.5-test-clust
     node observes the entry's `commit_index()` advance.
   - `disconnect(follower)` prevents the follower from catching up
     until `reset_faults`.
-- [ ] Gate: `test_raft_test_cluster` passes under the focused Clang 22 build;
-  `raft_lab_standalone` still needs its 4 legacy cases to pass before this
-  combined gate can be checked off.
+- [x] Gate: `test_raft_test_cluster` and all 4 legacy
+  `raft_lab_standalone` cases pass from the standard Clang 22 `build/`
+  directory (verified 2026-08-03).
 - [x] **Commit**: `raft: phase 8.5 — TestCluster runs real RaftServers`.
 
 ### 8.5 risks
@@ -897,7 +897,7 @@ verification. Listed here so they don't get lost.
 - [x] Phase 8.2 — RaftServerDispatcher (implementation; full test gate pending)
 - [x] Phase 8.3 — RaftServiceImpl → DispatcherProxy (implementation; full test gate pending)
 - [x] Phase 8.4 — storage proxies (implementation; full test gate pending)
-- [ ] Phase 8.5 — TestCluster with real RaftServer
+- [x] Phase 8.5 — TestCluster with real RaftServer
 - [ ] Phase 8.6 — port RaftTestConfig to TestCluster
 - [ ] Phase 8.7 — raft_lab_standalone full driver
 - [ ] Phase 8.8 — RaftClock (deferred)
