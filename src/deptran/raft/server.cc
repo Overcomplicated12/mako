@@ -1638,10 +1638,9 @@ bool RaftServer::DriveReplicationOnceForInMemoryTest() {
 void RaftServer::HeartbeatLoop() {
   // @unsafe
   {
-  // Kept for the legacy loop's timing initialization. Timer is a value type;
-  // allocating it on the heap here leaked one object for every loop start.
-  Timer hb_timer;
-  hb_timer.start();
+    // Timer is a value type; heap allocation here leaked one object per loop.
+    Timer hb_timer;
+    hb_timer.start();
   }
 
   parid_t partition_id = partition_id_;
