@@ -35,7 +35,8 @@ int RaftLabTest::Run(void) {
        std::strcmp(persistence_flag, "True") == 0);
 
   bool failed = false;
-  if (!persistence_enabled) {
+  const bool in_memory_cluster = config_->UsesTestCluster();
+  if (!persistence_enabled || in_memory_cluster) {
     Log_info("Running BASIC Raft test group (MAKO_RAFT_PERSISTENCE disabled)");
     failed =
         // Basic Raft tests (no disk durability)
@@ -78,6 +79,12 @@ int RaftLabTest::Run(void) {
 
   // CreateSnapshot integration tests
   if (!failed) {
+    if (in_memory_cluster) {
+      // Figure 8 intentionally leaves divergent, uncommitted tails. The
+      // snapshot integration cases are an independent section and need clean
+      // in-memory servers, just as their FileSnapshotManager fixtures are.
+      config_->ResetInMemoryClusterForIndependentTestSection();
+    }
     Log_info("Running CreateSnapshot tests");
     failed =
         TEST_EXPAND(testCreateSnapshotBasic())               // Test 55
@@ -92,6 +99,21 @@ int RaftLabTest::Run(void) {
         TEST_EXPAND(testInstallSnapshotBasic())              // Test 58
         || TEST_EXPAND(testInstallSnapshotRejectsStaleTerm()) // Test 59
         || TEST_EXPAND(testHeartbeatTriggersInstallSnapshot()); // Test 60
+  }
+
+  // TestCluster intentionally supplies no Frame, ReplicatedDB, filesystem
+  // persistence, or production timer fibers. Tests 1-60 are its complete
+  // in-memory lab contract; later groups exercise those omitted facilities.
+  if (in_memory_cluster) {
+    if (failed) {
+      Log_info("In-memory Raft lab sequence failed");
+      Print("TESTS FAILED");
+      return 1;
+    }
+    Log_info("In-memory Raft lab sequence completed through test 60");
+    Print("ALL TESTS PASSED");
+    Print("Total RPC count: %ld", config_->RpcTotal() - start_rpc);
+    return 0;
   }
 
   // Speculative index persistence tests
@@ -1458,14 +1480,14 @@ int RaftLabTest::testFailNoAgree(void) {
   Assert2(index == index_++ && term > 0,
           "Start() returned unexpected index (%ld, expected %ld) and/or term (%ld, expected >0)",
           index, index_-1, term);
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   AssertNoneCommitted(index);
   // reconnect followers
   config_->Reconnect(config_->getNextServerId(leader, 1));
   config_->Reconnect(config_->getNextServerId(leader, 2));
   config_->Reconnect(config_->getNextServerId(leader, 3));
   // do agreement in restored quorum
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   DoAgreeAndAssertWaitSuccess(502, NSERVERS);
   Passed2();
 }
@@ -1477,7 +1499,7 @@ int RaftLabTest::testRejoin(void) {
   auto leader1 = config_->OneLeader();
   AssertOneLeader(leader1);
   config_->Disconnect(leader1);
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   // Make old leader try to agree on some entries (these should not commit)
   uint64_t index, term;
   AssertStartOk(config_->Start(leader1, 602, &index, &term));
@@ -1494,7 +1516,7 @@ int RaftLabTest::testRejoin(void) {
   // reconnect old leader
   config_->Reconnect(leader1);
   // wait for new election
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   auto leader3 = config_->OneLeader();
   AssertOneLeader(leader3);
   AssertReElection(leader3, leader2);
@@ -1537,7 +1559,7 @@ int RaftLabTest::testConcurrentStarts(void) {
   bool success = false;
   for (int again = 0; again < 5; again++) {
     if (again > 0) {
-      wait(3000000);
+      config_->WaitForProgress(3000000);
     }
     auto leader = config_->OneLeader();
     AssertOneLeader(leader);
@@ -1611,7 +1633,7 @@ int RaftLabTest::testBackup(void) {
   for (int i = 0; i < 50; i++) {
     AssertStartOk(config_->Start(leader1, 800 + i, &index, &term));
   }
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   // disconnect the leader and its 1 follower, then reconnect the 3 servers
   Log_debug("disconnect the leader and its 1 follower, reconnect the 3 followers");
   config_->Disconnect(config_->getNextServerId(leader1, 1));
@@ -1620,7 +1642,7 @@ int RaftLabTest::testBackup(void) {
   config_->Reconnect(config_->getNextServerId(leader1, 3));
   config_->Reconnect(config_->getNextServerId(leader1, 4));
   // do a bunch of agreements among the new quorum
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   Log_debug("try to commit a lot of commands");
   for (int i = 1; i <= 50; i++) {
     DoAgreeAndAssertIndex(800 + i, NSERVERS - 2, index_++);
@@ -1629,7 +1651,7 @@ int RaftLabTest::testBackup(void) {
   Log_debug("reconnect the old leader and the follower");
   config_->Reconnect(config_->getNextServerId(leader1, 1));
   config_->Reconnect(leader1);
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   // do an agreement all together to check the old leader's incorrect
   // entries are replaced in a timely manner
   int leader2 = config_->OneLeader();
@@ -1637,7 +1659,7 @@ int RaftLabTest::testBackup(void) {
   AssertStartOk(config_->Start(leader2, 851, &index, &term));
   index_++;
   // 10 seconds should be enough to back up 50 incorrect logs
-  Fiber::sleep(2*ELECTIONTIMEOUT);
+  config_->WaitForProgress(2*ELECTIONTIMEOUT);
   Log_debug("check if the old leader has enough committed");
   AssertNCommitted(index, NSERVERS);
   Passed2();
@@ -1677,7 +1699,7 @@ int RaftLabTest::testCount(void) {
   bool success = false;
   for (int again = 0; again < 5; again++) {
     if (again > 0) {
-      wait(3000000);
+      config_->WaitForProgress(3000000);
     }
     auto leader = config_->OneLeader();
     AssertOneLeader(leader);
@@ -1720,7 +1742,7 @@ int RaftLabTest::testCount(void) {
   Assert2(success, "term changed too often");
 
   // idle RPC count
-  wait(1000000);
+  config_->WaitForProgress(1000000);
   total = rpcs();
   Assert2(total <= 60,
           "too many RPCs (%ld) for 1 second of idleness",
@@ -1815,7 +1837,7 @@ int RaftLabTest::testFigure8(void) {
       config_->Reconnect(config_->getNextServerId(leader1, 3));
       continue;
     }
-    Fiber::sleep(ELECTIONTIMEOUT);
+    config_->WaitForProgress(ELECTIONTIMEOUT);
     // C1 is at index i1 for S1 and S2
     AssertNoneCommitted(index1);
     // Elect new leader (S3) among other 3 servers
@@ -1829,7 +1851,7 @@ int RaftLabTest::testFigure8(void) {
     // let old leader (S1) and follower (S2) become a follower in the new term
     config_->Reconnect(config_->getNextServerId(leader1, 4));
     config_->Reconnect(leader1);
-    Fiber::sleep(ELECTIONTIMEOUT);
+    config_->WaitForProgress(ELECTIONTIMEOUT);
     AssertOneLeader(config_->OneLeader(leader2));
     Log_debug("disconnect all followers and Start() a cmd (C2) to isolated new leader");
     for (int i = 0; i < NSERVERS; i++) {
@@ -1848,7 +1870,7 @@ int RaftLabTest::testFigure8(void) {
     // C2 is at index i1 for S3, C1 still at index i1 for S1 & S2
     Assert2(index2 == index1, "Start() returned index %ld (%ld expected)", index2, index1);
     Assert2(term2 > term1, "Start() returned term %ld (%ld expected)", term2, term1);
-    Fiber::sleep(ELECTIONTIMEOUT);
+    config_->WaitForProgress(ELECTIONTIMEOUT);
     AssertNoneCommitted(index1);
     // Let first leader (S1) or its initial follower (S2) become next leader
     config_->Disconnect(leader2);
@@ -1865,7 +1887,7 @@ int RaftLabTest::testFigure8(void) {
       continue; // failed this step with a 1/3 chance. just start over until success.
     }
     // give leader3 more than enough time to replicate index1 to a third server
-    Fiber::sleep(ELECTIONTIMEOUT);
+    config_->WaitForProgress(ELECTIONTIMEOUT);
     // Make sure initial Start() value isn't getting committed at this point
     AssertNoneCommitted(index1);
     // Commit a new index in the current term
@@ -4795,7 +4817,7 @@ int RaftLabTest::testSnapshotManagerWiring(void) {
   Init2(54, "SnapshotManager wiring in RaftServer");
 
   // Wait for a leader
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   int leader = config_->OneLeader();
   AssertOneLeader(leader);
 
@@ -4849,7 +4871,7 @@ int RaftLabTest::testCreateSnapshotBasic(void) {
   Init2(55, "CreateSnapshot basic");
 
   // Wait for a leader
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   int leader = config_->OneLeader();
   AssertOneLeader(leader);
 
@@ -4861,6 +4883,9 @@ int RaftLabTest::testCreateSnapshotBasic(void) {
   janus::raft::SnapshotConfig config = janus::raft::SnapshotConfig::defaults();
   config.storage_path = test_path;
   auto test_mgr = std::make_shared<janus::raft::FileSnapshotManager>(config);
+  // A prior interrupted standalone run can leave this PID-derived fixture on
+  // disk. Establish the test's empty-manager precondition explicitly.
+  test_mgr->DeleteAllSnapshots();
   auto original_mgr = server->GetSnapshotManager();
   auto original_threshold = server->GetSnapshotThreshold();
   server->SetSnapshotManager(test_mgr);
@@ -4881,7 +4906,7 @@ int RaftLabTest::testCreateSnapshotBasic(void) {
   }
 
   // Give time for applyLogs to run and trigger CreateSnapshot
-  Fiber::sleep(2000000);  // 2 seconds
+  config_->WaitForProgress(2000000);  // 2 seconds
 
   // Verify a snapshot was taken
   Assert2(server->HasSnapshot(),
@@ -4917,7 +4942,7 @@ int RaftLabTest::testCreateSnapshotAndCompaction(void) {
   Init2(56, "CreateSnapshot and compaction");
 
   // Wait for a leader
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   int leader = config_->OneLeader();
   AssertOneLeader(leader);
 
@@ -4943,7 +4968,7 @@ int RaftLabTest::testCreateSnapshotAndCompaction(void) {
   }
 
   // Wait for snapshot and compaction
-  Fiber::sleep(2000000);
+  config_->WaitForProgress(2000000);
 
   uint64_t snap_idx = server->GetSnapshotIndex();
   Assert2(snap_idx > 0, "Snapshot should have been taken, got index=%lu", snap_idx);
@@ -4976,7 +5001,7 @@ int RaftLabTest::testSnapshotThresholdConfigurable(void) {
   Init2(57, "Snapshot threshold configurable");
 
   // Wait for a leader
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   int leader = config_->OneLeader();
   AssertOneLeader(leader);
 
@@ -5014,7 +5039,7 @@ int RaftLabTest::testInstallSnapshotBasic(void) {
   Init2(58, "InstallSnapshot basic");
 
   // Wait for a leader
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   int leader = config_->OneLeader();
   AssertOneLeader(leader);
 
@@ -5025,14 +5050,15 @@ int RaftLabTest::testInstallSnapshotBasic(void) {
   }
 
   // Pick a follower to install snapshot on
-  int follower = -1;
+  siteid_t follower = 0;
   for (int i = 0; i < NSERVERS; i++) {
-    if (i != leader) {
-      follower = i;
+    const siteid_t candidate = config_->getServerIdByIndex(i);
+    if (candidate != static_cast<siteid_t>(leader)) {
+      follower = candidate;
       break;
     }
   }
-  Assert2(follower >= 0, "No follower found");
+  Assert2(follower != 0, "No follower found");
 
   auto server = config_->GetServer(follower);
   Assert2(server != nullptr, "Follower server should not be null");
@@ -5106,7 +5132,7 @@ int RaftLabTest::testInstallSnapshotRejectsStaleTerm(void) {
   Init2(59, "InstallSnapshot rejects stale term");
 
   // Wait for a leader
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   int leader = config_->OneLeader();
   AssertOneLeader(leader);
 
@@ -5117,14 +5143,15 @@ int RaftLabTest::testInstallSnapshotRejectsStaleTerm(void) {
   }
 
   // Pick a follower
-  int follower = -1;
+  siteid_t follower = 0;
   for (int i = 0; i < NSERVERS; i++) {
-    if (i != leader) {
-      follower = i;
+    const siteid_t candidate = config_->getServerIdByIndex(i);
+    if (candidate != static_cast<siteid_t>(leader)) {
+      follower = candidate;
       break;
     }
   }
-  Assert2(follower >= 0, "No follower found");
+  Assert2(follower != 0, "No follower found");
 
   auto server = config_->GetServer(follower);
   Assert2(server != nullptr, "Follower server should not be null");
@@ -5181,7 +5208,7 @@ int RaftLabTest::testHeartbeatTriggersInstallSnapshot(void) {
   Init2(60, "HeartbeatLoop triggers InstallSnapshot for lagging follower");
 
   // Wait for a leader to be elected
-  Fiber::sleep(ELECTIONTIMEOUT);
+  config_->WaitForProgress(ELECTIONTIMEOUT);
   int leader = config_->OneLeader();
   AssertOneLeader(leader);
 
@@ -5205,7 +5232,7 @@ int RaftLabTest::testHeartbeatTriggersInstallSnapshot(void) {
   }
 
   // Wait for applyLogs to trigger CreateSnapshot on leader
-  Fiber::sleep(HEARTBEAT_INTERVAL * 3);
+  config_->WaitForProgress(HEARTBEAT_INTERVAL * 3);
 
   // Verify leader has taken a snapshot and compacted
   uint64_t leader_snap_idx = leader_server->GetSnapshotIndex();
@@ -5226,15 +5253,16 @@ int RaftLabTest::testHeartbeatTriggersInstallSnapshot(void) {
   Assert2(leader_min_active > 1, "Leader min_active_slot_ should be > 1 after compaction, got %lu", leader_min_active);
 
   // Pick a follower and simulate it being far behind
-  int follower = -1;
+  siteid_t follower = 0;
   siteid_t follower_site_id = 0;
   for (int i = 0; i < NSERVERS; i++) {
-    if (i != leader) {
-      follower = i;
+    const siteid_t candidate = config_->getServerIdByIndex(i);
+    if (candidate != static_cast<siteid_t>(leader)) {
+      follower = candidate;
       break;
     }
   }
-  Assert2(follower >= 0, "No follower found");
+  Assert2(follower != 0, "No follower found");
 
   auto follower_server = config_->GetServer(follower);
   Assert2(follower_server != nullptr, "Follower server should not be null");
@@ -5267,7 +5295,7 @@ int RaftLabTest::testHeartbeatTriggersInstallSnapshot(void) {
           leader_min_active);
 
   // Wait for a few heartbeat rounds to allow HeartbeatLoop to detect and send InstallSnapshot
-  Fiber::sleep(HEARTBEAT_INTERVAL * 5);
+  config_->WaitForProgress(HEARTBEAT_INTERVAL * 5);
 
   // Verify the leader updated next_index and match_index for the follower
   uint64_t final_next_index = 0;

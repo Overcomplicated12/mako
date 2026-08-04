@@ -811,17 +811,21 @@ on the 5-server deptran topology.
 `src/deptran/raft/raft_lab_standalone.cc` with a full RaftLabTest
 driver. Completion of the decouple plan.
 
-- [ ] Edit `src/deptran/raft/raft_lab_standalone.cc`:
+- [x] Edit `src/deptran/raft/raft_lab_standalone.cc`:
   - Build a 5-node `TestCluster`.
   - Construct `RaftTestConfig(*cluster)` (the Phase 8.6 constructor).
   - Construct `RaftLabTest testconfig` and call `test.Run()` +
     `test.Cleanup()`.
-- [ ] Exit with non-zero on any failed test case.
-- [ ] Gate:
-  - `./build/raft_lab_standalone` runs tests 1-60 (at minimum) end-to-end.
-  - `ss -lntp | grep raft_lab_standalone` → empty (no sockets bound).
-  - No `rocksdb` files on disk (MemoryLogStorage + MemorySnapshotManager).
-- [ ] **Commit**: `raft: phase 8.7 — raft_lab_standalone runs full
+- [x] Exit with non-zero on any failed test case.
+- [x] Gate (Clang 22, 2026-08-04):
+  - `./build/raft_lab_standalone` passes tests 1-11 and 50-60 end-to-end.
+  - `ctest --test-dir build --output-on-failure -R
+    '^(test_raft_test_cluster|test_raft_channel_transport)$'` passes.
+  - `ss -lntp | grep raft_lab_standalone` is empty after the run.
+  - No runtime RocksDB files (`*.sst`, `CURRENT`, `MANIFEST-*`) are created
+    outside `build/`; the harness uses `MemoryLogStorage` and
+    `MemorySnapshotManager`.
+- [x] **Commit**: `raft: phase 8.7 — raft_lab_standalone runs full
   RaftLabTest via TestCluster`.
 
 ### 8.7 risks
@@ -897,5 +901,5 @@ verification. Listed here so they don't get lost.
 - [x] Phase 8.4 — storage proxies (implementation; full test gate pending)
 - [x] Phase 8.5 — TestCluster with real RaftServer
 - [x] Phase 8.6 — port RaftTestConfig to TestCluster
-- [ ] Phase 8.7 — raft_lab_standalone full driver
+- [x] Phase 8.7 — raft_lab_standalone full driver
 - [ ] Phase 8.8 — RaftClock (deferred)

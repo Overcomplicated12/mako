@@ -177,6 +177,28 @@ TEST(RaftChannelTransportTest, DropDirectionFallsBackToDefault) {
   EXPECT_EQ(counts_b->n_timeout.load(), 1);
 }
 
+TEST(RaftChannelTransportTest, IsolationDropsAnEnvelopeQueuedBeforeDisconnect) {
+  ChannelSwitchboard sw;
+  auto rx_b = sw.register_site(2);
+  auto* raw_b = new RecordingDispatcher();
+  rusty::Arc<Counts> counts_b = raw_b->counts;
+  DispatcherProxy disp_b(raw_b);
+  ChannelNodeWorker w_b{std::move(rx_b), std::move(disp_b), &sw};
+  TransportProxy transport = make_channel_transport(&sw, 1, 0);
+
+  // The durable RPC queues successfully while the link is live. Disconnect
+  // before the worker dequeues it: the second isolation check must discard it.
+  transport->send_vote_durable(2, VoteDurableReq{7, 1});
+  sw.isolate_site(2);
+  EXPECT_TRUE(w_b.step());
+  EXPECT_EQ(counts_b->n_vote_durable.load(), 0);
+
+  sw.unisolate_site(2);
+  transport->send_vote_durable(2, VoteDurableReq{8, 1});
+  EXPECT_TRUE(w_b.step());
+  EXPECT_EQ(counts_b->n_vote_durable.load(), 1);
+}
+
 TEST(RaftChannelTransportTest, UndropRestoresOnlyTheSelectedDirection) {
   ChannelSwitchboard sw;
   auto rx_a = sw.register_site(1);

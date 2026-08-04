@@ -15,6 +15,7 @@
  * transport and RaftServerDispatcher boundary.
  */
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -82,6 +83,16 @@ class TestCluster : public TestClusterFacade {
     const size_t i = index_of(site);
     return i == nodes_.size() || dead_[i] ? 0 : nodes_[i]->commit_index();
   }
+  bool node_has_committed_command(siteid_t site, uint64_t index,
+                                  int command_id) override {
+    const size_t i = index_of(site);
+    return i != nodes_.size() && !dead_[i] &&
+           nodes_[i]->server()->HasCommittedCommandForInMemoryTest(
+               index, command_id);
+  }
+  uint64_t node_rpc_count(siteid_t site) const override {
+    return sw_.rpc_count(site);
+  }
 
   // @safe - lifecycle inspection for the in-memory reactor owned by a node.
   bool has_live_poll_thread(siteid_t s) const {
@@ -98,21 +109,17 @@ class TestCluster : public TestClusterFacade {
 
   // @safe - stops all traffic from `s` to every peer and vice versa.
   void disconnect(siteid_t s) override {
-    for (auto peer : site_ids_) {
-      if (peer == s) continue;
-      sw_.drop_direction(s, peer);
-      sw_.drop_direction(peer, s);
-    }
+    const size_t i = index_of(s);
+    if (i != nodes_.size()) isolated_[i] = true;
+    sw_.isolate_site(s);
   }
 
   // @safe - restores only traffic involving `s`; unrelated directed drops and
   // active partitions remain installed on the switchboard.
   void reconnect(siteid_t s) override {
-    for (auto peer : site_ids_) {
-      if (peer == s) continue;
-      sw_.undrop_direction(s, peer);
-      sw_.undrop_direction(peer, s);
-    }
+    const size_t i = index_of(s);
+    if (i != nodes_.size()) isolated_[i] = false;
+    sw_.unisolate_site(s);
   }
 
   // @safe - splits sites into two groups that cannot exchange
@@ -123,14 +130,33 @@ class TestCluster : public TestClusterFacade {
   }
 
   // @safe - clear all fault injections.
-  void reset_faults() override { sw_.reset_faults(); }
+  void reset_faults() override {
+    sw_.reset_faults();
+    std::fill(isolated_.begin(), isolated_.end(), false);
+  }
+
+  // @safe - make a clean real-server cluster for an independent in-memory
+  // lab section. Workers and poll threads are stopped before server teardown;
+  // retained test storage is cleared only after no server can access it.
+  void reset_for_independent_test_section() override {
+    // Fence every queued delivery before taking down any one receiver. A
+    // synchronous sender whose destination disappears must observe its reply
+    // channel close; otherwise a peer PollThread can remain in an RPC wait
+    // while this reset tries to join it.
+    for (auto site : site_ids_) disconnect(site);
+    for (auto site : site_ids_) kill(site);
+    for (auto& log : logs_) (void)log->clear();
+    for (auto& snapshot : snaps_) (void)snapshot->DeleteAllSnapshots();
+    for (auto site : site_ids_) restart(site);
+    reset_faults();
+  }
 
   // @safe - starts an election on the first live node's PollThread. One
   // explicit reactor job keeps elections deterministic without enabling the
   // production timer fiber, which requires RaftCommo/Frame state.
   bool step_election(siteid_t candidate = 0) override {
     for (size_t i = 0; i < nodes_.size(); ++i) {
-      if (dead_[i]) continue;
+      if (dead_[i] || isolated_[i]) continue;
       if (candidate != 0 && nodes_[i]->id() != candidate) continue;
       auto result = std::make_shared<std::atomic<bool>>(false);
       if (!run_on_poll_thread(i, [server = nodes_[i]->server(), result]() {
@@ -204,7 +230,7 @@ class TestCluster : public TestClusterFacade {
   // Only the leader sends traffic; other calls are no-ops.
   bool step_replication() override {
     for (size_t i = 0; i < nodes_.size(); ++i) {
-      if (dead_[i]) continue;
+      if (dead_[i] || isolated_[i]) continue;
       if (!run_on_poll_thread(i, [server = nodes_[i]->server()]() {
             (void)server->DriveReplicationOnceForInMemoryTest();
           })) {
@@ -237,16 +263,13 @@ class TestCluster : public TestClusterFacade {
   void restart(siteid_t s) override {
     const size_t i = index_of(s);
     if (!dead_[i]) return;
-    for (auto peer : site_ids_) {
-      if (peer == s) continue;
-      sw_.undrop_direction(s, peer);
-      sw_.undrop_direction(peer, s);
-    }
+    sw_.unisolate_site(s);
+    isolated_[i] = false;
     auto receiver = sw_.register_site(s);
     node(s).replace_server(make_server(i));
     start_poll_thread(i);
     workers_[i] = std::make_unique<ChannelNodeWorker>(
-        std::move(receiver), node(s).take_dispatcher());
+        std::move(receiver), node(s).take_dispatcher(), &sw_);
     start_worker(i);
     dead_[i] = false;
   }
@@ -303,7 +326,7 @@ class TestCluster : public TestClusterFacade {
           make_server(i)));
 
       auto worker = std::make_unique<ChannelNodeWorker>(
-          std::move(receivers[i]), node->take_dispatcher());
+          std::move(receivers[i]), node->take_dispatcher(), &sw_);
 
       nodes_.push_back(std::move(node));
       workers_.push_back(std::move(worker));
@@ -314,6 +337,7 @@ class TestCluster : public TestClusterFacade {
     // partially bootstrapped peer set.
     // @unsafe { std::thread at test-harness boundary }
     dead_.assign(n, false);
+    isolated_.assign(n, false);
     worker_threads_.resize(n);
     poll_threads_.resize(n);
     poll_thread_generations_.assign(n, 0);
@@ -406,6 +430,7 @@ class TestCluster : public TestClusterFacade {
   std::vector<std::unique_ptr<ChannelNodeWorker>> workers_;
   std::vector<rusty::Box<RaftNode>>              nodes_;
   std::vector<bool>                              dead_;
+  std::vector<bool>                              isolated_;
   std::vector<std::shared_ptr<MemorySnapshotManager>> snaps_;
   std::vector<std::shared_ptr<InMemoryLogStorage>>    logs_;
   std::vector<siteid_t>                          site_ids_;

@@ -1948,6 +1948,12 @@ class RaftServer : public TxLogServer {
   // logic while avoiding RaftCommo/Frame assumptions.
   bool DriveReplicationOnceForInMemoryTest();
 
+  // Read-only in-memory lab assertion helper. It verifies the actual command
+  // stored at a committed index instead of letting the harness infer content
+  // from a global index table; divergent Raft histories may reuse an index.
+  bool HasCommittedCommandForInMemoryTest(uint64_t index,
+                                          int command_id);
+
   slotid_t min_active_slot_ = 1; // anything before (lt) this slot is freed
   slotid_t max_executed_slot_ = 0;
   slotid_t max_committed_slot_ = 0;

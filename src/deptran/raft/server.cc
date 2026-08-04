@@ -1161,10 +1161,29 @@ void RaftServer::setIsLeader(bool isLeader) {
 #endif
 
 
-  if (isLeader) {  // [Jetpack] This need to be done before new leader realized it is a leader, otherwise new leader will use incorrect next_index_ balabala
+  if (isLeader) {  // [Jetpack] This needs to happen before leadership becomes visible.
     // Add null check for communicator
     if (commo_ == nullptr) {
-      Log_info("commo_ is null, skipping leader initialization");
+      // The explicit in-memory bootstrap deliberately has no RaftCommo or
+      // Frame, but a new leader still needs the normal Raft volatile-state
+      // reset. Reusing match/next indexes from a prior leadership term can
+      // make the deterministic replication driver believe a divergent peer
+      // is already caught up, which prevents the current-term entry from
+      // committing (Figure 8).
+      if (!prev_is_leader) {
+        match_index_.clear();
+        next_index_.clear();
+        for (auto peer : current_config()) {
+          if (peer == site_id_) continue;
+          match_index_[peer] = 0;
+          next_index_[peer] = lastLogIndex + 1;
+        }
+        for (auto peer : learners()) {
+          if (peer == site_id_) continue;
+          match_index_[peer] = 0;
+          next_index_[peer] = lastLogIndex + 1;
+        }
+      }
     } else {
       // Reset leader volatile state
       vector<SiteProxyPair> proxies;
@@ -1429,6 +1448,21 @@ void RaftServer::applyLogs() {
   }
 }
 
+bool RaftServer::HasCommittedCommandForInMemoryTest(uint64_t index,
+                                                    int command_id) {
+  std::lock_guard<std::recursive_mutex> lock(mtx_);
+  if (index > commitIndex) return false;
+
+  const auto it = raft_logs_.find(index);
+  if (it == raft_logs_.end() || !it->second ||
+      it->second->log_.kind_ != TpcCommitCommand::static_kind()) {
+    return false;
+  }
+
+  const auto command = marshallable_cast<TpcCommitCommand>(it->second->log_);
+  return command.is_some() && command.as_ref().unwrap()->tx_id_ == command_id;
+}
+
 // The in-memory cluster drives replication explicitly instead of starting the
 // production heartbeat fiber: that fiber requires RaftCommo/Frame state which
 // the named test bootstrap intentionally does not construct.
@@ -1466,14 +1500,42 @@ bool RaftServer::DriveReplicationOnceForInMemoryTest() {
       uint64_t entry_term = 0;
       janus::Command entry{};
       bool has_entry = false;
+      bool send_snapshot = false;
+      uint64_t snapshot_index = 0;
+      raft::InstallSnapshotReq snapshot_request{};
       {
         std::lock_guard<std::recursive_mutex> lock(mtx_);
         if (stop_ || !IsLeader()) return false;
         auto& next = next_index_[peer];
         if (next == 0 || next > lastLogIndex + 1) next = lastLogIndex + 1;
+        if (next < min_active_slot_ && snapshot_manager_) {
+          janus::raft::SnapshotMetadata metadata{};
+          std::string data;
+          if (snapshot_manager_->LoadLatestSnapshot(&metadata, &data)) {
+            snapshot_request = raft::InstallSnapshotReq{
+                currentTerm, site_id_, metadata.last_included_index,
+                metadata.last_included_term, std::move(data)};
+            snapshot_index = metadata.last_included_index;
+            send_snapshot = true;
+          } else {
+            Log_warn("[INMEM-RAFT] Site {} cannot load a snapshot for follower {}",
+                     site_id_, peer);
+            break;
+          }
+        }
+        if (send_snapshot) {
+          // Do not materialize a compacted RaftData entry through
+          // GetRaftInstance(). The follower must receive the snapshot before
+          // normal AppendEntries resumes at snapshot_index + 1.
+          term = currentTerm;
+        } else {
         previous_index = next - 1;
         if (previous_index != 0) {
-          previous_term = GetRaftInstance(previous_index)->term;
+          if (previous_index == snapshot_progress_core_.snapshot_index()) {
+            previous_term = snapshot_progress_core_.snapshot_term();
+          } else {
+            previous_term = GetRaftInstance(previous_index)->term;
+          }
         }
         if (next <= lastLogIndex) {
           auto instance = GetRaftInstance(next);
@@ -1483,6 +1545,25 @@ bool RaftServer::DriveReplicationOnceForInMemoryTest() {
         }
         term = currentTerm;
         leader_commit = commitIndex;
+        }
+      }
+
+      if (send_snapshot) {
+        const auto reply = transport()->send_install_snapshot(
+            peer, std::move(snapshot_request));
+        std::lock_guard<std::recursive_mutex> lock(mtx_);
+        if (stop_ || !IsLeader() || currentTerm != term) break;
+        if (reply.term_out > currentTerm) {
+          currentTerm = reply.term_out;
+          stepDown(StepDownReason::HigherTerm);
+          return false;
+        }
+        // InstallSnapshot replies only carry the follower term. As in the
+        // production heartbeat path, a non-higher-term reply advances this
+        // peer to the sent snapshot boundary.
+        next_index_[peer] = snapshot_index + 1;
+        match_index_[peer] = snapshot_index;
+        continue;
       }
 
       raft::AppendEntriesReply reply{};
