@@ -517,8 +517,9 @@ returns `shared_ptr<SendAppendEntriesResults>`. Callers read `res->done`,
 - [x] Gate: lab test tests 1-60 all pass. Verified with Clang 22 on
   2026-08-01: TEST 3 (Basic agreement), TEST 7 (Concurrent starts), TEST 11
   (Figure 8), and TEST 60 (HeartbeatLoop triggers InstallSnapshot) passed.
-- [ ] **Commit**: `raft: phase 8.1d — migrate SendAppendEntries /
-  SendAppendEntries2 to per-peer transport_->send_append_entries`.
+- [x] **Commit**: `3dc6ba2b Complete Raft phase 8.1d` — migrated
+  `SendAppendEntries` / `SendAppendEntries2` to per-peer
+  `transport_->send_append_entries`.
 
 ### 8.1.e — Migrate the remaining outbound sites
 
@@ -552,6 +553,14 @@ Validation: Clang 22 `mako` build plus `test_raft_quorum`,
 The server-backed lab range through test 60 passes. The full runner still
 aborts in test 63 during a Kill/Restart learner callback; the throughput gate
 remains pending.
+
+Latest merged verification (Clang 22, 2026-08-05, merge `9545f827`): a fresh
+Ninja build succeeded for `test_raft_channel_transport`,
+`test_raft_test_cluster`, `raft_lab_standalone`, `test_rpc_log_storage`, and
+`test_rpc_rocksdb_log_storage`. The corresponding four-test CTest selection
+passed, and `raft_lab_standalone` completed tests 1-11 and 50-60 with
+`ALL TESTS PASSED`. This verifies the Rust-DSL merge compatibility; it does
+not satisfy the pending production throughput gate above.
 
 ### 8.1 risks
 
