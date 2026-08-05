@@ -16,6 +16,7 @@
 #include <rusty/slice.hpp>
 
 import std;
+import rusty;
 
 // @external: {
 //   Log_info: [safe, (...) -> void]
@@ -344,19 +345,20 @@ void RaftWorker::SetupBase() {
         return;
       }
       // Notify all partitions that currently have callback registrations.
-      std::set<uint32_t> par_ids;
+      auto par_ids = rusty::BTreeSet<uint32_t>::new_();
       for (const auto& kv : leader_callbacks_by_partition_) {
         par_ids.insert(kv.first);
       }
       for (const auto& kv : follower_callbacks_by_partition_) {
         par_ids.insert(kv.first);
       }
-      if (raft_worker_should_notify_default_partition(!par_ids.empty())) {
+      if (raft_worker_should_notify_default_partition(!par_ids.is_empty())) {
         uint32_t par_id = site_info_ ? site_info_->partition_id_ : 0;
         NotifyRaftLeaderChange(par_id, leader);
       } else {
-        for (uint32_t pid : par_ids) {
-          NotifyRaftLeaderChange(pid, leader);
+        auto iter = par_ids.iter();
+        for (auto pid = iter.next(); pid.is_some(); pid = iter.next()) {
+          NotifyRaftLeaderChange(pid.unwrap(), leader);
         }
       }
     });
@@ -380,8 +382,8 @@ void RaftWorker::SetupService() {
   auto& poll_worker = svr_poll_thread_worker_.as_ref().unwrap();
 
   // Create RPC server first (before registering services)
-  rpc_server_ = std::make_unique<rrr::Server>(
-      rrr::Server::new_(rusty::Some(poll_worker.clone())));
+  rpc_server_ = rusty::Some(rusty::Box<rrr::Server>::emplace(
+      rrr::Server::new_(rusty::Some(poll_worker.clone()))));
 
   // Create and register Raft services (ownership transferred to rpc_server_)
   if (rep_frame_ != nullptr) {
@@ -389,12 +391,13 @@ void RaftWorker::SetupService() {
                                                    rep_sched_,
                                                    poll_worker);
     for (auto& svc : services) {
-      rpc_server_->reg_service_proxy(std::move(svc));
+      rpc_server_.as_mut().unwrap()->reg_service_proxy(std::move(svc));
     }
   }
 
   // Start RPC server
-  int ret = rpc_server_->start(reinterpret_cast<const int8_t*>(bind_addr.c_str()));
+  int ret = rpc_server_.as_mut().unwrap()->start(
+      reinterpret_cast<const int8_t*>(bind_addr.c_str()));
   if (ret != 0) {
     Log_fatal("Raft server launch failed at {}", bind_addr.c_str());
   }
@@ -434,31 +437,34 @@ void RaftWorker::SetupHeartbeat() {
   // ServerControlServiceImpl ctor 3rd
   // `Recorder*` parameter removed; updated call site to 2 args.
   svr_hb_poll_thread_worker_g = rusty::Some(rrr::PollThread::create());
-  hb_rpc_server_ = std::make_unique<rrr::Server>(
+  hb_rpc_server_ = rusty::Some(rusty::Box<rrr::Server>::emplace(
       rrr::Server::new_(rusty::Some(
-          svr_hb_poll_thread_worker_g.as_ref().unwrap().clone())));
+          svr_hb_poll_thread_worker_g.as_ref().unwrap().clone()))));
 
   // Create shared status and pass clone to service
   server_status_ = rusty::Some(rusty::Arc<ServerStatus>::make());
-  hb_rpc_server_->reg_service_typed(rusty::make_box<ServerControlServiceImpl>(server_status_.as_ref().unwrap().clone(), 5));
+  hb_rpc_server_.as_mut().unwrap()->reg_service_typed(
+      rusty::make_box<ServerControlServiceImpl>(
+          server_status_.as_ref().unwrap().clone(), 5));
 
   auto port = site_info_->port + CtrlPortDelta;
   std::string addr_port = site_info_->GetHostAddr(CtrlPortDelta);
 
-  hb_rpc_server_->start(reinterpret_cast<const int8_t*>(addr_port.c_str()));
+  hb_rpc_server_.as_mut().unwrap()->start(
+      reinterpret_cast<const int8_t*>(addr_port.c_str()));
 }
 
 // @unsafe - resets owned RPC servers and clears borrowed protocol pointers
 void RaftWorker::ShutDown() {
   Log_info("[RAFT-WORKER-SHUTDOWN] entering");
 
-  if (rpc_server_) {
-    Log_info("[RAFT-WORKER-SHUTDOWN] resetting rpc_server_");
-    rpc_server_.reset();
+  if (rpc_server_.is_some()) {
+    Log_info("[RAFT-WORKER-SHUTDOWN] clearing rpc_server_");
+    rpc_server_ = rusty::None;
   }
 
-  if (hb_rpc_server_) {
-    hb_rpc_server_.reset();  // Server destructor cleans up owned services
+  if (hb_rpc_server_.is_some()) {
+    hb_rpc_server_ = rusty::None;  // Server destructor cleans up owned services
     server_status_ = rusty::None;
   }
 
@@ -495,11 +501,11 @@ void RaftWorker::ShutDown() {
 void RaftWorker::WaitForShutdown() {
   StopSubmitThread();
 
-  if (hb_rpc_server_) {
+  if (hb_rpc_server_.is_some()) {
     // @unsafe
     { // hb_rpc_server_-> raw pointer dereference
-      hb_rpc_server_->do_shutdown();
-      hb_rpc_server_->wait_for_shutdown();
+      hb_rpc_server_.as_mut().unwrap()->do_shutdown();
+      hb_rpc_server_.as_mut().unwrap()->wait_for_shutdown();
     }
   }
 }
@@ -559,7 +565,7 @@ void RaftWorker::StartSubmitThread() {
   if (!raft_worker_should_start_submit_thread(submit_thread_started_)) {
     return;
   }
-  submit_thread_stop_ = false;
+  submit_thread_stop_.store(false, rusty::sync::atomic::Ordering::Release);
   submit_thread_started_ = true;
   // @unsafe
   { // 'this' pointer passed to std::thread constructor
@@ -574,14 +580,14 @@ void RaftWorker::StopSubmitThread() {
   }
   {
     std::lock_guard<std::mutex> lock(submit_mutex_);
-    submit_thread_stop_ = true;
+    submit_thread_stop_.store(true, rusty::sync::atomic::Ordering::Release);
   }
   submit_cv_.notify_all();
   if (submit_thread_.joinable()) {
     submit_thread_.join();
   }
   submit_thread_started_ = false;
-  submit_thread_stop_ = false;
+  submit_thread_stop_.store(false, rusty::sync::atomic::Ordering::Release);
 
   std::deque<RaftWorkerPendingLog> remaining;
   {
@@ -596,7 +602,8 @@ void RaftWorker::StopSubmitThread() {
 // @unsafe
 void RaftWorker::EnqueueLog(const char* log, int len, uint32_t par_id, int batch_size) {
   if (!raft_worker_should_enqueue(
-          submit_thread_started_, submit_thread_stop_.load())) {
+          submit_thread_started_,
+          submit_thread_stop_.load(rusty::sync::atomic::Ordering::Acquire))) {
     // @unsafe
     { // const char* propagation to Submit
       Submit(log, len, par_id);
@@ -675,8 +682,9 @@ void RaftWorker::Submit(const char* log_entry, int length, uint32_t par_id) {
   }
 
   // Use a simple incrementing tx_id (in production this would be a global txn ID)
-  static std::atomic<txnid_t> next_tx_id{1};
-  txnid_t tx_id = next_tx_id.fetch_add(1);
+  static rusty::sync::atomic::Atomic<txnid_t> next_tx_id{1};
+  txnid_t tx_id = next_tx_id.fetch_add(
+      1, rusty::sync::atomic::Ordering::Relaxed);
 
   // Use the production helper to create proper TpcCommitCommand{cmd_=VecPieceData}
   auto tpc_cmd = CreateRaftLogCommand(log_entry, length, tx_id, par_id);
@@ -689,7 +697,7 @@ void RaftWorker::Submit(const char* log_entry, int length, uint32_t par_id) {
   }
 
   if (raft_worker_should_count_submission(true, appended)) {
-    n_tot++;
+    n_tot.fetch_add(1, rusty::sync::atomic::Ordering::Relaxed);
   }
   }
 }
@@ -697,7 +705,7 @@ void RaftWorker::Submit(const char* log_entry, int length, uint32_t par_id) {
 // @safe
 void RaftWorker::IncSubmit() {
   // @unsafe
-  { n_submit++; }
+  { n_submit.fetch_add(1, rusty::sync::atomic::Ordering::Relaxed); }
 }
 
 // @unsafe
@@ -705,7 +713,8 @@ void RaftWorker::WaitForSubmit() {
   std::unique_lock<std::mutex> lock(condition_mutex_);
   // Wait logic - can be enhanced with condition variable if needed
   // For now, simple busy wait
-  while (raft_worker_wait_for_submit(n_submit.load(), tot_num)) {
+  while (raft_worker_wait_for_submit(
+      n_submit.load(rusty::sync::atomic::Ordering::Acquire), tot_num)) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   lock.unlock();
@@ -994,14 +1003,16 @@ void RaftWorker::SubmitLoop() {
       // @unsafe
       { // operator bool on std::atomic<bool>
         return raft_worker_submit_loop_should_wake(
-            submit_thread_stop_.load(), submit_queue_.empty());
+            submit_thread_stop_.load(rusty::sync::atomic::Ordering::Acquire),
+            submit_queue_.empty());
       }
     });
     bool should_stop = false;
     // @unsafe
     { // operator bool on std::atomic<bool>
       should_stop = raft_worker_submit_loop_should_stop(
-          submit_thread_stop_.load(), submit_queue_.empty());
+          submit_thread_stop_.load(rusty::sync::atomic::Ordering::Acquire),
+          submit_queue_.empty());
     }
     if (should_stop) {
       break;

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <rusty/arc.hpp>
+#include <rusty/box.hpp>
+#include <rusty/option.hpp>
 #include "../__dep__.h"
 #include "../coordinator.h"
 #include "../benchmark_control_rpc.h"
@@ -13,7 +15,6 @@
 #include <condition_variable>
 #include <deque>
 #include <map>
-#include <memory>
 #include <thread>
 #include <rusty/cell.hpp>
 #include <rusty/function.hpp>
@@ -204,18 +205,17 @@ private:
   std::deque<RaftWorkerPendingLog> submit_queue_;
   std::mutex submit_mutex_;
   std::condition_variable submit_cv_;
-  std::atomic<bool> submit_thread_stop_{false};
+  rusty::sync::atomic::AtomicBool submit_thread_stop_{false};
   bool submit_thread_started_{false};
   std::thread submit_thread_;
   RaftWorkerStateCore state_core_;
 
 public:
   // Statistics
-  // Keep these atomics hand-written: they are cross-thread counters/flags, not
-  // Cell candidates. Cell would not preserve atomicity.
-  std::atomic<int> n_current{0};   // Current in-flight requests
-  std::atomic<int> n_submit{0};    // Total submitted
-  std::atomic<int> n_tot{0};       // Total processed
+  // Cross-thread counters retain atomic semantics through Rusty atomics.
+  rusty::sync::atomic::AtomicI32 n_current{0};  // Current in-flight requests
+  rusty::sync::atomic::AtomicI32 n_submit{0};   // Total submitted
+  rusty::sync::atomic::AtomicI32 n_tot{0};      // Total processed
   // removed old submit counter
   // `int submit_tot_sec_ = 0;` / `int submit_tot_usec_ = 0;` — these
   // fed only the now-deleted `microbench_paxos` / `microbench_paxos_queue`
@@ -244,17 +244,17 @@ public:
   // RPC infrastructure
   // @safe - shared PollThread handle; Arc/Option manages this lifetime.
   rusty::Option<rusty::Arc<PollThread>> svr_poll_thread_worker_;
-  // @unsafe - owned RPC server. Allocated in SetupService(), reset in ShutDown();
+  // @unsafe - owned RPC server. Allocated in SetupService(), cleared in ShutDown();
   // services are transferred to the server via reg_service().
-  std::unique_ptr<rrr::Server> rpc_server_;
+  rusty::Option<rusty::Box<rrr::Server>> rpc_server_{rusty::None};
 
   // Heartbeat/control RPC
   // @safe - shared heartbeat PollThread/status handles.
   rusty::Option<rusty::Arc<PollThread>> svr_hb_poll_thread_worker_g;
   rusty::Option<rusty::Arc<ServerStatus>> server_status_;
   // @unsafe - owned heartbeat/control server. Allocated in SetupHeartbeat(),
-  // reset in ShutDown().
-  std::unique_ptr<rrr::Server> hb_rpc_server_;
+  // cleared in ShutDown().
+  rusty::Option<rusty::Box<rrr::Server>> hb_rpc_server_{rusty::None};
 
   // Queue for unreplayed logs (follower only)
   std::queue<std::tuple<int, int, int, int, const char*>> un_replay_logs_;

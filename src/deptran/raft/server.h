@@ -19,6 +19,8 @@
 #include "snapshot_manager.hpp"
 #include <rusty/function.hpp>
 
+import rusty;
+
 // @external: {
 //   Log_info: [safe, (...) -> void],
 //   Log_debug: [safe, (...) -> void],
@@ -875,8 +877,8 @@ inline void RaftServerLeadershipCore::set_startup_timestamp(uint64_t timestamp) 
 
 #if RUSTYCPP_RUST
 pub struct RaftServerMembershipCore {
-    current_config_: std::set<u16>,
-    learners_: std::set<u16>,
+    current_config_: rusty::BTreeSet<u16>,
+    learners_: rusty::BTreeSet<u16>,
     config_change_pending_: rusty::Cell<bool>,
     pending_config_index_: rusty::Cell<u64>,
     catchup_threshold_: rusty::Cell<u64>,
@@ -886,8 +888,8 @@ impl RaftServerMembershipCore {
     // @safe
     fn new() -> RaftServerMembershipCore {
         RaftServerMembershipCore {
-            current_config_: std::set::<u16>{},
-            learners_: std::set::<u16>{},
+            current_config_: rusty::BTreeSet::<u16>::new_(),
+            learners_: rusty::BTreeSet::<u16>::new_(),
             config_change_pending_: rusty::Cell::<bool>::new_(false),
             pending_config_index_: rusty::Cell::<u64>::new_(0),
             catchup_threshold_: rusty::Cell::<u64>::new_(100),
@@ -925,32 +927,32 @@ impl RaftServerMembershipCore {
     }
 
     // @safe
-    fn current_config(&self) -> &std::set<u16> {
+    fn current_config(&self) -> &rusty::BTreeSet<u16> {
         &self.current_config_
     }
 
     // @safe
-    fn current_config_mut(&mut self) -> &mut std::set<u16> {
+    fn current_config_mut(&mut self) -> &mut rusty::BTreeSet<u16> {
         &mut self.current_config_
     }
 
     // @safe
-    fn learners(&self) -> &std::set<u16> {
+    fn learners(&self) -> &rusty::BTreeSet<u16> {
         &self.learners_
     }
 
     // @safe
-    fn learners_mut(&mut self) -> &mut std::set<u16> {
+    fn learners_mut(&mut self) -> &mut rusty::BTreeSet<u16> {
         &mut self.learners_
     }
 }
 #endif
-/*RUSTYCPP:GEN-BEGIN id=server.membership_core version=1 rust_sha256=a824b86dd32d6e5ce3c828b6ff329d06d81cc7d70a5d07c553bbbe94a518ce38*/
+/*RUSTYCPP:GEN-BEGIN id=server.membership_core version=1 rust_sha256=304ae7688cb24313bbe68e11d215c6703ecb57f7a367fd85f66627ff8c8672fb*/
 struct RaftServerMembershipCore;
 
 struct RaftServerMembershipCore {
-    std::set<uint16_t> current_config_;
-    std::set<uint16_t> learners_;
+    rusty::BTreeSet<uint16_t> current_config_;
+    rusty::BTreeSet<uint16_t> learners_;
     rusty::Cell<bool> config_change_pending_;
     rusty::Cell<uint64_t> pending_config_index_;
     rusty::Cell<uint64_t> catchup_threshold_;
@@ -962,15 +964,15 @@ struct RaftServerMembershipCore {
     void set_pending_config_index(uint64_t index);
     uint64_t catchup_threshold() const;
     void set_catchup_threshold(uint64_t threshold);
-    const std::set<uint16_t>& current_config() const;
-    std::set<uint16_t>& current_config_mut();
-    const std::set<uint16_t>& learners() const;
-    std::set<uint16_t>& learners_mut();
+    const rusty::BTreeSet<uint16_t>& current_config() const;
+    rusty::BTreeSet<uint16_t>& current_config_mut();
+    const rusty::BTreeSet<uint16_t>& learners() const;
+    rusty::BTreeSet<uint16_t>& learners_mut();
 };
 
 
 inline RaftServerMembershipCore RaftServerMembershipCore::new_() {
-    return RaftServerMembershipCore{.current_config_ = std::set<uint16_t>{}, .learners_ = std::set<uint16_t>{}, .config_change_pending_ = rusty::Cell<bool>::new_(false), .pending_config_index_ = rusty::Cell<uint64_t>::new_(static_cast<uint64_t>(0)), .catchup_threshold_ = rusty::Cell<uint64_t>::new_(static_cast<uint64_t>(100))};
+    return RaftServerMembershipCore{.current_config_ = rusty::BTreeSet<uint16_t>::new_(), .learners_ = rusty::BTreeSet<uint16_t>::new_(), .config_change_pending_ = rusty::Cell<bool>::new_(false), .pending_config_index_ = rusty::Cell<uint64_t>::new_(static_cast<uint64_t>(0)), .catchup_threshold_ = rusty::Cell<uint64_t>::new_(static_cast<uint64_t>(100))};
 }
 
 inline bool RaftServerMembershipCore::config_change_pending() const {
@@ -997,19 +999,19 @@ inline void RaftServerMembershipCore::set_catchup_threshold(uint64_t threshold) 
     this->catchup_threshold_.set(std::move(threshold));
 }
 
-inline const std::set<uint16_t>& RaftServerMembershipCore::current_config() const {
+inline const rusty::BTreeSet<uint16_t>& RaftServerMembershipCore::current_config() const {
     return this->current_config_;
 }
 
-inline std::set<uint16_t>& RaftServerMembershipCore::current_config_mut() {
+inline rusty::BTreeSet<uint16_t>& RaftServerMembershipCore::current_config_mut() {
     return this->current_config_;
 }
 
-inline const std::set<uint16_t>& RaftServerMembershipCore::learners() const {
+inline const rusty::BTreeSet<uint16_t>& RaftServerMembershipCore::learners() const {
     return this->learners_;
 }
 
-inline std::set<uint16_t>& RaftServerMembershipCore::learners_mut() {
+inline rusty::BTreeSet<uint16_t>& RaftServerMembershipCore::learners_mut() {
     return this->learners_;
 }
 /*RUSTYCPP:GEN-END id=server.membership_core*/
@@ -1609,7 +1611,7 @@ class RaftServer : public TxLogServer {
   // ============================================================================
   // Tracks the active set of replicas in this partition. Initialized from the
   // static partition config in Setup(), then modified by AddServer/RemoveServer.
-  // All quorum calculations should use current_config().size() instead of the
+  // All quorum calculations should use current_config().len() instead of the
   // static Config::GetConfig()->GetPartitionSize().
   RaftServerMembershipCore membership_core_;
 
@@ -1622,19 +1624,19 @@ class RaftServer : public TxLogServer {
   // Once a learner's match_index_ is within catchup_threshold_ of the
   // leader's lastLogIndex, it is promoted to a full member in current_config().
 
-  std::set<siteid_t>& current_config() {
+  rusty::BTreeSet<siteid_t>& current_config() {
     return membership_core_.current_config_mut();
   }
 
-  const std::set<siteid_t>& current_config() const {
+  const rusty::BTreeSet<siteid_t>& current_config() const {
     return membership_core_.current_config();
   }
 
-  std::set<siteid_t>& learners() {
+  rusty::BTreeSet<siteid_t>& learners() {
     return membership_core_.learners_mut();
   }
 
-  const std::set<siteid_t>& learners() const {
+  const rusty::BTreeSet<siteid_t>& learners() const {
     return membership_core_.learners();
   }
 
@@ -1924,7 +1926,9 @@ class RaftServer : public TxLogServer {
     snapshot_manager_ =
         janus::raft::make_snapshot_manager_proxy(std::move(deps.snapshots));
     current_config().clear();
-    current_config().insert(deps.peers.begin(), deps.peers.end());
+    for (const auto peer : deps.peers) {
+      current_config().insert(peer);
+    }
     learners().clear();
     stop_ = false;
     looping_ = true;
@@ -2140,7 +2144,7 @@ class RaftServer : public TxLogServer {
   // @safe - raw pointer parameter is bounded (frame outlives server)
   RaftServer(Frame *frame) ;
   // @unsafe - thread join and timer cleanup require manual resource management
-  ~RaftServer() ;
+  ~RaftServer() noexcept override;
 
   // ============================================================================
   // LOG PERSISTENCE PUBLIC API
@@ -2400,7 +2404,7 @@ class RaftServer : public TxLogServer {
 
   /**
    * Get the current quorum size based on current_config().
-   * @return Majority size: current_config().size() / 2 + 1
+   * @return Majority size: current_config().len() / 2 + 1
    */
   // @safe - Read-only computation on member field
   size_t GetQuorumSize() const;
@@ -2411,19 +2415,19 @@ class RaftServer : public TxLogServer {
    */
   // @safe - Read-only accessor
   // @lifetime: (&'a) -> &'a
-  const std::set<siteid_t>& GetCurrentConfig() const;
+  const rusty::BTreeSet<siteid_t>& GetCurrentConfig() const;
 
   /**
    * Check if a server is a learner (being caught up, not yet in quorum).
    */
-  // @unsafe - Read-only lookup on std::set
-  bool IsLearner(siteid_t id) const { return learners().count(id) > 0; }
+  // @unsafe - Read-only lookup on the Rusty membership set.
+  bool IsLearner(siteid_t id) const { return learners().contains(id); }
 
   /**
    * Get the current set of learners.
    */
   // @unsafe - returns reference to internal state (no @lifetime annotation)
-  const std::set<siteid_t>& GetLearners() const { return learners(); }
+  const rusty::BTreeSet<siteid_t>& GetLearners() const { return learners(); }
 
   /**
    * Promote a learner to full member in current_config().

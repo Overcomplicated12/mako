@@ -237,8 +237,9 @@ RaftServiceImpl::RemoveServer(const RpcRemoveServerRequest& req) {
 // rebuilding the RPC service or poll thread.
 // =====================================================================
 
-std::map<siteid_t, RaftServiceImpl*> RaftServiceImpl::service_registry_;
-std::mutex RaftServiceImpl::registry_mutex_;
+rusty::Mutex<rusty::BTreeMap<siteid_t, RaftServiceImpl*>>
+    RaftServiceImpl::service_registry_{
+        rusty::BTreeMap<siteid_t, RaftServiceImpl*>::new_()};
 
 // @unsafe - C-style cast from scheduler base to borrowed RaftServer pointer.
 // The service stores the pointer atomically but does not own the server.
@@ -249,8 +250,8 @@ RaftServiceImpl::RaftServiceImpl(TxLogServer *sched, rusty::Arc<rrr::PollThread>
   // @unsafe
   RaftServer* svr = (RaftServer*)sched;
   {
-    std::lock_guard<std::mutex> lock(registry_mutex_);
-    service_registry_[state_core_.site_id()] = this;
+    auto registry = service_registry_.lock().unwrap();
+    registry->insert(state_core_.site_id(), this);
   }
   struct timespec curr_time;
   clock_gettime(CLOCK_MONOTONIC_RAW, &curr_time);
@@ -258,23 +259,26 @@ RaftServiceImpl::RaftServiceImpl(TxLogServer *sched, rusty::Arc<rrr::PollThread>
 }
 
 RaftServiceImpl::~RaftServiceImpl() {
-  std::lock_guard<std::mutex> lock(registry_mutex_);
-  auto it = service_registry_.find(state_core_.site_id());
-  if (it != service_registry_.end() && it->second == this) {
-    service_registry_.erase(it);
+  auto registry = service_registry_.lock().unwrap();
+  auto service = registry->get(state_core_.site_id());
+  if (service.is_some() && service.unwrap() == this) {
+    // BTreeMap::remove currently cannot return a raw-pointer value through
+    // the transpiled port. Keep the key but clear the borrowed pointer.
+    registry->insert(state_core_.site_id(), nullptr);
   }
 }
 
 void RaftServiceImpl::UpdateServer(siteid_t site_id, RaftServer* new_svr) {
-  std::lock_guard<std::mutex> lock(registry_mutex_);
-  auto it = service_registry_.find(site_id);
-  if (it != service_registry_.end()) {
+  auto registry = service_registry_.lock().unwrap();
+  auto service = registry->get(site_id);
+  if (service.is_some() && service.unwrap() != nullptr) {
     // Wait for every in-flight handler using the old borrowed pointer before
     // publishing nullptr/replacement. Kill() may destroy the old frame as
     // soon as this returns, so acquire/release alone is not sufficient.
+    auto* target = service.unwrap();
     std::unique_lock<std::mutex> server_lock(
-        it->second->server_lifecycle_mutex_);
-    it->second->state_core_.set_server(new_svr);
+        target->server_lifecycle_mutex_);
+    target->state_core_.set_server(new_svr);
     Log_info("[RAFT-SERVICE] UpdateServer: site {} -> {}", site_id, (void*)new_svr);
   } else {
     Log_warn("[RAFT-SERVICE] UpdateServer: site {} not found in registry", site_id);
@@ -374,12 +378,13 @@ bool raft::run_raft_service_update_server_in_flight_test(
 
 rusty::Option<rusty::Arc<rrr::PollThread>>
 RaftServiceImpl::GetPollThread(siteid_t site_id) {
-  std::lock_guard<std::mutex> lock(registry_mutex_);
-  auto it = service_registry_.find(site_id);
+  auto registry = service_registry_.lock().unwrap();
+  auto service = registry->get(site_id);
   if (raft_service_poll_thread_available(
-          it != service_registry_.end(),
-          it != service_registry_.end() && it->second->state_core_.has_poll_thread())) {
-    return it->second->state_core_.clone_poll_thread();
+          service.is_some(),
+          service.is_some() && service.unwrap() != nullptr &&
+              service.unwrap()->state_core_.has_poll_thread())) {
+    return service.unwrap()->state_core_.clone_poll_thread();
   }
   return rusty::None;
 }

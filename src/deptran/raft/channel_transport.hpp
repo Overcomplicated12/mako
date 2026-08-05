@@ -285,7 +285,7 @@ class ChannelSwitchboard {
   // @safe - registers a new site. Returns the receiver side.
   rusty::sync::mpsc::Receiver<Envelope> register_site(siteid_t s) {
     auto [tx, rx] = rusty::sync::mpsc::channel<Envelope>();
-    senders_.push_back({s, std::move(tx)});
+    senders_.push({s, std::move(tx)});
     return std::move(rx);
   }
 
@@ -293,10 +293,13 @@ class ChannelSwitchboard {
   // receiver, which lets a blocking ChannelNodeWorker exit before its
   // dispatcher (and the server it borrows) is destroyed.
   void unregister_site(siteid_t s) {
-    senders_.erase(
-        std::remove_if(senders_.begin(), senders_.end(),
-                       [s](const auto& entry) { return entry.first == s; }),
-        senders_.end());
+    for (size_t i = 0; i < senders_.size();) {
+      if (senders_[i].first == s) {
+        senders_.remove(i);
+      } else {
+        ++i;
+      }
+    }
   }
 
   // @unsafe { pushes into mpsc; drops silently if the dest is gone }
@@ -378,7 +381,7 @@ class ChannelSwitchboard {
   // when a whole site is disconnected.
   bool dispatch_is_blocked(const Envelope& env) const {
     return is_isolated(env.from) || is_isolated(env.to);
-  }
+ }
 
  private:
   struct Metrics {
@@ -391,7 +394,7 @@ class ChannelSwitchboard {
             (uint64_t{1} << site)) != 0;
   }
 
-  std::vector<std::pair<siteid_t, rusty::sync::mpsc::Sender<Envelope>>> senders_;
+  rusty::Vec<std::pair<siteid_t, rusty::sync::mpsc::Sender<Envelope>>> senders_;
   std::shared_ptr<std::atomic<uint64_t>> isolated_sites_;
   std::shared_ptr<Metrics> metrics_;
   ChannelSwitchboardStateCore state_core_;
