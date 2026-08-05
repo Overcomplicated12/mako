@@ -853,6 +853,7 @@ driver. Completion of the decouple plan.
 
 Not required for the core decouple goal. Add `RaftClock` + `ManualClock`
 if deterministic testing (advance-time-by-N-ms) becomes valuable.
+Implementation plan: [Raft Phase 8.8 Clock Plan](dev/raft-phase-8.8-clock-plan.md).
 
 ---
 
