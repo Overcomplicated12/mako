@@ -16,6 +16,9 @@ class RaftLabTest {
  public:
   RaftLabTest(RaftTestConfig *config) : config_(config), index_(1) {}
   int Run(void);
+  // Executes the Phase 8.6 real-server subset without the unrelated
+  // persistence, snapshot, or speculative-state cases in Run().
+  int RunPhase86Subset(void);
   void Cleanup(void);
 
  private:

@@ -27,25 +27,6 @@ import rusty;
 
 namespace janus
 {
-  namespace {
-
-  // @unsafe - Compatibility bridge for the Raft Rust-DSL response shape.
-  // Reactor registration is owned by an Arc after the upstream event
-  // migration, while AppendEntriesResponse intentionally retains the branch's
-  // shared_ptr<IntEvent> API. The shared_ptr's deleter owns the Arc and never
-  // deletes the borrowed raw pointer directly.
-  std::shared_ptr<IntEvent> commo_share_int_event(
-      rusty::Arc<IntEvent> event) {
-    IntEvent* event_ptr = event.as_ptr();
-    return std::shared_ptr<IntEvent>(
-        event_ptr,
-        [event = std::move(event)](IntEvent*) mutable {
-          // Dropping the captured Arc releases this ownership share.
-          (void)event;
-        });
-  }
-
-  }  // namespace
 
   // @safe
   RaftCommo::RaftCommo(rusty::Option<rusty::Arc<PollThread>> poll)
@@ -56,280 +37,31 @@ namespace janus
     //  verify(poll != nullptr);
   }
 
-  // @unsafe - Legacy quorum RPC boundary: raw RaftProxy cast and async
-  // FutureAttr callback. The returned shared_ptr is intentionally captured by
-  // the callback so the response/event storage outlives this function.
-  shared_ptr<AppendEntriesResponse>
-  RaftCommo::SendAppendEntries2(siteid_t site_id,
-                                parid_t par_id,
-                                slotid_t slot_id,
-                                ballot_t ballot,
-                                bool isLeader,
-                                siteid_t leader_site_id,
-                                uint64_t currentTerm,
-                                uint64_t prevLogIndex,
-                                uint64_t prevLogTerm,
-                                uint64_t commitIndex,
-                                const janus::Command &cmd,
-                                uint64_t cmdLogTerm)
-  {
-    // Allocate response data with shared_ptr; the async callback captures it
-    // and signals response->event when the legacy Future completes.
-    auto response = std::make_shared<AppendEntriesResponse>(
-        AppendEntriesResponse::defaults());
-    response->event = commo_share_int_event(
-        Reactor::create_sp_event<IntEvent>());
-
-    auto proxies = rpc_par_proxies_[par_id];
-    // vector<rusty::Arc<Future>> fus;
-    WAN_WAIT;
-    for (auto &p : proxies)
-    {
-      if (!commo_proxy_is_target(p.first, site_id))
-        continue;
-      Log_debug("[RPC-SEND] Sending AppendEntries to site {} via proxy {}",
-                site_id, static_cast<void*>(p.second));
-      auto follower_id = p.first;
-      RaftProxy *proxy;
-      // @unsafe
-      {
-        proxy = (RaftProxy *)p.second;
-      }
-      FutureAttr fuattr;
-      // Capture response shared_ptr so FutureAttr can run after this function
-      // returns without dangling response/event storage.
-      fuattr.callback = [response, site_id](rusty::Arc<Future> fu)
-      {
-        if (commo_future_failed(fu->get_error_code()))
-        {
-          // Don't reconnect here - rely on NotifyRestart mechanism instead
-          Log_debug("[APPEND_RPC] Error response from site {}, error_code={}", site_id, fu->get_error_code());
-          return;
-        }
-        uint64_t status = 0;
-        uint64_t term = 0;
-        uint64_t last_log_index = 0;
-        uint64_t ack_type = 0;
-        rrr::deserialize_from(fu->get_reply(), status, term, last_log_index, ack_type);
-        response->apply_reply(status, term, last_log_index, ack_type);
-        Log_debug("[APPEND_RPC] Success response from site {}: status={}, term={}, lastLogIndex={}, ackType={}",
-                  site_id, response->status, response->term, response->last_log_index, response->ack_type);
-        response->event->set(1);
-      };
-
-      if (commo_should_send_empty_append_entries(cmd.has_value()))
-      {
-        // send a heartbeat AppendEntries
-        Log_debug("Heartbeat AppendEntries to site {} prevLogIndex={}", site_id, prevLogIndex);
-        RaftProxy::RpcEmptyAppendEntriesRequest req{};
-        req.slot = slot_id;
-        req.ballot = ballot;
-        req.leaderCurrentTerm = currentTerm;
-        req.leaderSiteId = leader_site_id;
-        req.leaderPrevLogIndex = prevLogIndex;
-        req.leaderPrevLogTerm = prevLogTerm;
-        req.leaderCommitIndex = commitIndex;
-        req.trigger_election_now = false;
-        auto f = proxy->async_EmptyAppendEntries(req, fuattr);
-        _RPC_COUNT();
-        if (commo_future_result_ok(f.is_ok()))
-        {
-          Future::safe_release(f.unwrap().raw_future());
-        }
-      }
-      else
-      {
-        // send a regular AppendEntries
-        verify(cmd.has_value());
-
-        Log_debug("AppendEntries to site {} for log index {}", site_id, prevLogIndex + 1);
-        RaftProxy::RpcAppendEntriesRequest req{};
-        req.slot = slot_id;
-        req.ballot = ballot;
-        req.leaderCurrentTerm = currentTerm;
-        req.leaderSiteId = leader_site_id;
-        req.leaderPrevLogIndex = prevLogIndex;
-        req.leaderPrevLogTerm = prevLogTerm;
-        req.leaderCommitIndex = commitIndex;
-        req.cmd = cmd;
-        req.leaderNextLogTerm = cmdLogTerm;
-        auto f = proxy->async_AppendEntries(req, fuattr);
-        _RPC_COUNT();
-        if (commo_future_result_ok(f.is_ok()))
-        {
-          Future::safe_release(f.unwrap().raw_future());
-        }
-      }
+  // @unsafe - copies legacy raw proxy pointers from Communicator ownership.
+  vector<SiteProxyPair> RaftCommo::PeerProxies(parid_t par_id) const {
+    auto it = rpc_par_proxies_.find(par_id);
+    if (it == rpc_par_proxies_.end()) {
+      return {};
     }
-    return response;
+    return it->second;
   }
 
-  // @unsafe - Legacy quorum RPC boundary. The returned shared result is the
-  // rendezvous object observed by the caller while the async callback fills it.
-  shared_ptr<SendAppendEntriesResults>
-  RaftCommo::SendAppendEntries(siteid_t site_id,
-                               parid_t par_id,
-                               slotid_t slot_id,
-                               ballot_t ballot,
-                               bool isLeader,
-                               siteid_t leader_site_id,
-                               uint64_t currentTerm,
-                               uint64_t prevLogIndex,
-                               uint64_t prevLogTerm,
-                               uint64_t commitIndex,
-                               const janus::Command &cmd,
-                               uint64_t cmdLogTerm,
-                               bool trigger_election_now)
-  {
-    // verify(par_id == 0);
-    auto res = std::make_shared<SendAppendEntriesResults>(
-        SendAppendEntriesResults::defaults());
-    auto proxies = rpc_par_proxies_[par_id];
-    // vector<rusty::Arc<Future>> fus;
-    WAN_WAIT;
-    for (auto &p : proxies)
-    {
-      if (!commo_proxy_is_target(p.first, site_id))
-        continue;
-      auto follower_id = p.first;
-      RaftProxy *proxy;
-      // @unsafe
-      {
-        proxy = (RaftProxy *)p.second;
-      }
-      FutureAttr fuattr;
-      // Capture res by shared_ptr because the legacy FutureAttr callback may
-      // run after SendAppendEntries returns to the heartbeat loop.
-      fuattr.callback = [res, cmd, site_id](rusty::Arc<Future> fu)
-      {
-        if (commo_future_failed(fu->get_error_code()))
-        {
-          // Don't reconnect here - rely on NotifyRestart mechanism instead
-          Log_debug("[APPEND_RPC] Error response from site {}, error_code={}", site_id, fu->get_error_code());
-          return;
-        }
-        uint64_t ok = 0;
-        uint64_t follower_term = 0;
-        uint64_t follower_last_log_index = 0;
-        uint64_t follower_ack_type = 0;
-        rrr::deserialize_from(fu->get_reply(), ok);
-        rrr::deserialize_from(fu->get_reply(), follower_term);
-        rrr::deserialize_from(fu->get_reply(), follower_last_log_index);
-        rrr::deserialize_from(fu->get_reply(), follower_ack_type);
-        // false, 0, 0, 0 is the return value reserved to simulate a lost RPC.
-        // only set res->done if it's not a lost RPC
-        res->apply_reply(ok, follower_term, follower_last_log_index,
-                         follower_ack_type, cmd.has_value());
-      };
-
-      if (commo_should_send_empty_append_entries(cmd.has_value()))
-      {
-        // send a heartbeat AppendEntries
-        Log_debug("Heartbeat AppendEntries to site {} prevLogIndex={} trigger_election={}",
-                  site_id, prevLogIndex, trigger_election_now);
-        RaftProxy::RpcEmptyAppendEntriesRequest req{};
-        req.slot = slot_id;
-        req.ballot = ballot;
-        req.leaderCurrentTerm = currentTerm;
-        req.leaderSiteId = leader_site_id;
-        req.leaderPrevLogIndex = prevLogIndex;
-        req.leaderPrevLogTerm = prevLogTerm;
-        req.leaderCommitIndex = commitIndex;
-        req.trigger_election_now = trigger_election_now;
-        auto f = proxy->async_EmptyAppendEntries(req, fuattr);
-        _RPC_COUNT();
-        if (commo_future_result_ok(f.is_ok()))
-        {
-          Future::safe_release(f.unwrap().raw_future());
-        }
-      }
-      else
-      {
-        // send a regular AppendEntries
-        verify(cmd.has_value());
-
-        Log_debug("AppendEntries to site {} for log index {}", site_id, prevLogIndex + 1);
-        RaftProxy::RpcAppendEntriesRequest req{};
-        req.slot = slot_id;
-        req.ballot = ballot;
-        req.leaderCurrentTerm = currentTerm;
-        req.leaderSiteId = leader_site_id;
-        req.leaderPrevLogIndex = prevLogIndex;
-        req.leaderPrevLogTerm = prevLogTerm;
-        req.leaderCommitIndex = commitIndex;
-        req.cmd = cmd;
-        req.leaderNextLogTerm = cmdLogTerm;
-        auto f = proxy->async_AppendEntries(req, fuattr);
-        _RPC_COUNT();
-        if (commo_future_result_ok(f.is_ok()))
-        {
-          Future::safe_release(f.unwrap().raw_future());
-        }
-      }
-    }
-    return res;
+  // @unsafe - used only by the RAFT_TEST_CORO Kill/Restart lifecycle.
+  RaftCommo::PartitionProxyTable RaftCommo::TakePartitionProxyTable() {
+    PartitionProxyTable proxy_table = std::move(rpc_par_proxies_);
+    rpc_par_proxies_.clear();
+    return proxy_table;
   }
 
-  // @unsafe - Legacy fanout RPC boundary. The quorum event is shared with each
-  // async vote callback and with the caller waiting for quorum.
-  shared_ptr<RaftVoteQuorumEvent>
-  RaftCommo::BroadcastVote(parid_t par_id,
-                           slotid_t lst_log_idx,
-                           ballot_t lst_log_term,
-                           siteid_t self_id,
-                           ballot_t cur_term)
-  {
-    int n = 0;
-    // @unsafe
-    {
-      n = Config::GetConfig()->GetPartitionSize(par_id);
-    }
-    auto e = std::make_shared<RaftVoteQuorumEvent>(n, n / 2);
-    auto proxies = rpc_par_proxies_[par_id];
-    WAN_WAIT;
-    for (auto &p : proxies)
-    {
-      auto site_id = p.first;
-      if (commo_proxy_is_self(site_id, self_id))
-      {
-        continue;
-      }
-      RaftProxy *proxy;
-      // @unsafe
-      {
-        proxy = (RaftProxy *)p.second;
-      }
-      FutureAttr fuattr;
-      // Capture the quorum event by shared_ptr so peer replies can arrive
-      // after BroadcastVote returns.
-      fuattr.callback = [e, site_id](rusty::Arc<Future> fu)
-      {
-        if (commo_future_failed(fu->get_error_code()))
-        {
-          // Don't reconnect here - rely on NotifyRestart mechanism instead
-          Log_debug("[VOTE_RPC] Error response from site {}, error_code={}", site_id, fu->get_error_code());
-          return;
-        }
-        ballot_t term = 0;
-        bool_t vote = false;
-        rrr::deserialize_from(fu->get_reply(), term);
-        rrr::deserialize_from(fu->get_reply(), vote);
-        // SPECULATIVE VOTING: Track which site voted yes
-        e->FeedResponse(vote, term, site_id);
-      };
-      RaftProxy::RpcVoteRequest req{};
-      req.lst_log_idx = lst_log_idx;
-      req.lst_log_term = lst_log_term;
-      req.site_id = self_id;
-      req.cur_term = cur_term;
-      auto f = proxy->async_Vote(req, fuattr);
-      _RPC_COUNT();
-      if (commo_future_result_ok(f.is_ok()))
-      {
-        Future::safe_release(f.unwrap().raw_future());
-      }
-    }
-    return std::move(e);
+  // @unsafe - restores raw proxy ownership after a RAFT_TEST_CORO restart.
+  void RaftCommo::RestorePartitionProxyTable(PartitionProxyTable proxy_table) {
+    rpc_par_proxies_ = std::move(proxy_table);
+  }
+
+  // @unsafe - Communicator maintains the process-wide partition view map.
+  void RaftCommo::PublishPartitionView(parid_t partition_id,
+                                       const ViewData& view_data) {
+    Communicator::UpdatePartitionView(partition_id, view_data);
   }
 
   // ============================================================================
@@ -1011,10 +743,9 @@ namespace janus
       }
     }
 
-    // @unsafe - legacy RPC boundary with fanout: raw RaftProxy casts and async
-    // FutureAttr callbacks. The same rusty::Function callback is shared across
-    // multiple peer replies through shared_ptr.
-    void RaftCommo::BroadcastVoteCb(
+    // @unsafe - legacy RPC boundary: raw RaftProxy cast and async callback.
+    void RaftCommo::SendVoteCb(
+        siteid_t site_id,
         parid_t par_id,
         slotid_t lst_log_idx,
         ballot_t lst_log_term,
@@ -1024,25 +755,20 @@ namespace janus
     {
       auto proxies = rpc_par_proxies_[par_id];
       WAN_WAIT;
-
-      // @safe - BroadcastVoteCb fans out to many peers, so the move-only
-      // rusty::Function cannot be moved into each lambda. shared_ptr gives each
-      // async callback shared access to the same reply handler.
+      // FutureAttr::callback needs a copyable lambda. Keep the move-only
+      // callback in shared ownership across the legacy async RPC boundary.
       auto on_reply_ptr = std::make_shared<rusty::Function<void(siteid_t, raft::VoteReply)>>(std::move(on_reply));
       for (auto &p : proxies)
       {
-        auto site_id = p.first;
-        if (commo_proxy_is_self(site_id, self_id))
+        if (p.first != site_id)
           continue;
+
         RaftProxy *proxy;
-        // @unsafe - legacy proxy table stores untyped proxy pointers;
-        // each peer entry is expected to be a RaftProxy*.
+        // @unsafe - legacy proxy table stores untyped proxy pointers.
         {
           proxy = (RaftProxy *)p.second;
         }
         FutureAttr fuattr;
-        // @unsafe - callback is invoked asynchronously by the legacy RPC runtime.
-        // Captures only site_id and shared ownership of the reply handler.
         fuattr.callback = [on_reply_ptr, site_id](rusty::Arc<Future> fu)
         {
           if (commo_future_failed(fu->get_error_code()))
@@ -1055,10 +781,10 @@ namespace janus
           bool_t vote = false;
           rrr::deserialize_from(fu->get_reply(), term);
           rrr::deserialize_from(fu->get_reply(), vote);
-          raft::VoteReply r = commo_make_vote_reply(term, vote);
+          raft::VoteReply reply = commo_make_vote_reply(term, vote);
           if (commo_callback_is_set(static_cast<bool>(*on_reply_ptr)))
           {
-            (*on_reply_ptr)(site_id, r);
+            (*on_reply_ptr)(site_id, std::move(reply));
           }
         };
         RaftProxy::RpcVoteRequest req{};
@@ -1072,6 +798,7 @@ namespace janus
         {
           Future::safe_release(f.unwrap().raw_future());
         }
+        return;
       }
     }
 

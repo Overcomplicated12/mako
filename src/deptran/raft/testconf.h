@@ -2,10 +2,15 @@
 
 #include "frame.h"
 #include "coordinator.h"
+#include "test_cluster_facade.hpp"
 #include <map>
 #include <rusty/function.hpp>
 
 namespace janus {
+
+namespace raft {
+class TestCluster;
+}
 
 #ifdef RAFT_TEST_CORO
 
@@ -28,7 +33,7 @@ namespace janus {
 #define Print(format, ...) fprintf(stderr, format "\n", ##__VA_ARGS__)
 
 extern int _test_id_g;
-#define Init(test_id, description) \
+#define RaftTestInit(test_id, description) \
   Print("TEST %d: " description, test_id); \
   _test_id_g = test_id
 #define Failed(msg, ...) Print("TEST %d Failed: " msg, _test_id_g, ##__VA_ARGS__)
@@ -47,6 +52,16 @@ class RaftTestConfig {
   static std::map<siteid_t, std::function<int(int, janus::Command)>> commit_callbacks;
   static std::map<siteid_t, std::vector<int>> committed_cmds;
   static std::map<siteid_t, uint64_t> rpc_count_last;
+
+  // Borrowed cluster-only backend. A non-null value selects the in-memory
+  // real-server path; the Frame registry remains exclusively for production
+  // `deptran_server -f raft_lab_test.yml` tests.
+  raft::TestClusterFacade* cluster_ = nullptr;
+  // The in-memory path records submissions by (index, term). A divergent
+  // leader may reuse an uncommitted index in a later term, so index alone is
+  // not a stable command identity.
+  std::map<std::pair<uint64_t, uint64_t>, int> cluster_submitted_commands_;
+  std::map<siteid_t, uint64_t> cluster_rpc_count_last_;
 
   // disconnected_[svr] true if svr is disconnected by Disconnect()/Reconnect()
   std::map<siteid_t, bool> disconnected_;
@@ -71,6 +86,7 @@ class RaftTestConfig {
   // The registry becomes responsible for Kill()/Restart() replacement during
   // the test config lifetime.
   RaftTestConfig(std::map<siteid_t, RaftFrame*>& replicas);
+  RaftTestConfig(raft::TestCluster& cluster);
 
   // sets up learner action functions for the servers
   // so that each committed command on each server is
@@ -114,6 +130,19 @@ class RaftTestConfig {
   // -3 if committed values for index differ
   int Wait(uint64_t index, int n, uint64_t term);
 
+  // Advances the backend enough for a lab test's election/heartbeat wait.
+  // Frame-backed tests retain Fiber::sleep; TestCluster uses synchronous
+  // replication because its reduced bootstrap has no production timer fiber.
+  void WaitForProgress(uint64_t usecs);
+
+  // True only for the reduced in-memory real-server backend. The full lab
+  // runner uses this to stop at its Phase 8.7 supported boundary (tests 1-60).
+  bool UsesTestCluster() const { return cluster_ != nullptr; }
+
+  // Start a new isolated in-memory lab section without affecting the legacy
+  // Frame-backed harness.
+  void ResetInMemoryClusterForIndependentTestSection();
+
   // Does one agreement.
   // Submits a command with value cmd to the leader
   // Waits at most 2 seconds until n servers commit the command.
@@ -127,6 +156,10 @@ class RaftTestConfig {
 
   // Reconnects disconnected server
   void Reconnect(siteid_t svr);
+
+  // Splits the supplied groups at the TestCluster switchboard. The Frame
+  // backend has no equivalent direct fault primitive.
+  void Partition(std::vector<siteid_t> a, std::vector<siteid_t> b);
 
   // Kills server (destroys it completely, clearing all in-memory state)
   void Kill(siteid_t svr);

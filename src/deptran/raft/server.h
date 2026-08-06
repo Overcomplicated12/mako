@@ -5,16 +5,22 @@
 #include "../scheduler.h"
 #include "../classic/tpc_command.h"
 #include "commo.h"
+#include "clock.hpp"
+#include "transport.hpp"
 #include <deque>
 #include <rusty/box.hpp>
 #include <rusty/arc.hpp>
 #include <rusty/cell.hpp>
 #include <rusty/sync/atomic.hpp>
 #include <rusty/option.hpp>
+#include "log_storage_facade.hpp"
 #include "log_storage.hpp"
 #include "recovery_manager.hpp"
+#include "snapshot_manager_facade.hpp"
 #include "snapshot_manager.hpp"
 #include <rusty/function.hpp>
+
+import rusty;
 
 // @external: {
 //   Log_info: [safe, (...) -> void],
@@ -29,7 +35,6 @@
 //   Fiber::sleep: [safe, (int) -> void],
 //   RandomGenerator::rand_double: [safe, (double, double) -> double],
 //   RandomGenerator::rand: [safe, (int, int) -> int],
-//   Time::now: [safe, () -> uint64_t],
 //   std::make_shared: [safe, (...) -> shared_ptr<T>],
 //   dynamic_pointer_cast: [safe, (shared_ptr<T>) -> shared_ptr<U>],
 //   strcmp: [safe, (const char*, const char*) -> int],
@@ -966,47 +971,47 @@ struct RaftServerMembershipCore {
 };
 
 
-RaftServerMembershipCore RaftServerMembershipCore::new_() {
+inline RaftServerMembershipCore RaftServerMembershipCore::new_() {
     return RaftServerMembershipCore{.current_config_ = rusty::BTreeSet<uint16_t>::new_(), .learners_ = rusty::BTreeSet<uint16_t>::new_(), .config_change_pending_ = rusty::Cell<bool>::new_(false), .pending_config_index_ = rusty::Cell<uint64_t>::new_(static_cast<uint64_t>(0)), .catchup_threshold_ = rusty::Cell<uint64_t>::new_(static_cast<uint64_t>(100))};
 }
 
-bool RaftServerMembershipCore::config_change_pending() const {
+inline bool RaftServerMembershipCore::config_change_pending() const {
     return this->config_change_pending_.get();
 }
 
-void RaftServerMembershipCore::set_config_change_pending(bool value) {
+inline void RaftServerMembershipCore::set_config_change_pending(bool value) {
     this->config_change_pending_.set(std::move(value));
 }
 
-uint64_t RaftServerMembershipCore::pending_config_index() const {
+inline uint64_t RaftServerMembershipCore::pending_config_index() const {
     return this->pending_config_index_.get();
 }
 
-void RaftServerMembershipCore::set_pending_config_index(uint64_t index) {
+inline void RaftServerMembershipCore::set_pending_config_index(uint64_t index) {
     this->pending_config_index_.set(std::move(index));
 }
 
-uint64_t RaftServerMembershipCore::catchup_threshold() const {
+inline uint64_t RaftServerMembershipCore::catchup_threshold() const {
     return this->catchup_threshold_.get();
 }
 
-void RaftServerMembershipCore::set_catchup_threshold(uint64_t threshold) {
+inline void RaftServerMembershipCore::set_catchup_threshold(uint64_t threshold) {
     this->catchup_threshold_.set(std::move(threshold));
 }
 
-const rusty::BTreeSet<uint16_t>& RaftServerMembershipCore::current_config() const {
+inline const rusty::BTreeSet<uint16_t>& RaftServerMembershipCore::current_config() const {
     return this->current_config_;
 }
 
-rusty::BTreeSet<uint16_t>& RaftServerMembershipCore::current_config_mut() {
+inline rusty::BTreeSet<uint16_t>& RaftServerMembershipCore::current_config_mut() {
     return this->current_config_;
 }
 
-const rusty::BTreeSet<uint16_t>& RaftServerMembershipCore::learners() const {
+inline const rusty::BTreeSet<uint16_t>& RaftServerMembershipCore::learners() const {
     return this->learners_;
 }
 
-rusty::BTreeSet<uint16_t>& RaftServerMembershipCore::learners_mut() {
+inline rusty::BTreeSet<uint16_t>& RaftServerMembershipCore::learners_mut() {
     return this->learners_;
 }
 /*RUSTYCPP:GEN-END id=server.membership_core*/
@@ -1410,6 +1415,32 @@ inline void RaftServerSnapshotProgressCore::set_snapshot_term(uint64_t term) {
 }
 /*RUSTYCPP:GEN-END id=server.10*/
 
+// Every dependency needed by the in-process test harness.  This is purposely
+// distinct from the production constructor/Setup() contract: no Config,
+// Frame, persistence path, or ReplicatedDB is implicit in this value.
+struct RaftServerInMemoryTestDependencies {
+  siteid_t site_id;
+  locid_t loc_id;
+  parid_t partition_id;
+  std::vector<siteid_t> peers;
+  // Required test dependency. TestCluster supplies a shared manual clock in
+  // phase 8.8c; accepting the same proxy as production avoids test-mode time
+  // branches in RaftServer.
+  raft::RaftClockProxy clock;
+  raft::TransportProxy transport;
+  std::shared_ptr<janus::raft::LogStorage> storage;
+  std::shared_ptr<janus::raft::SnapshotManager> snapshots;
+  // A fixed timeout makes manual-clock tests deterministic. Production and
+  // in-memory callers that omit it retain the normal timeout policy.
+  rusty::Option<uint64_t> election_timeout_us{rusty::None};
+  // The harness drives election/replication explicitly. Production recovery
+  // and leadership-transfer services require a Frame/RaftCommo environment.
+  bool enable_background_leadership_services = false;
+  // Witness GC consults global Config, which is deliberately absent from the
+  // reduced in-memory harness.
+  bool enable_rule_witness_gc = false;
+};
+
 // @unsafe - large stateful Raft core. Phase 3 extracted pure election, append,
 // commit, snapshot, and leadership predicates; raw frame/commo pointers,
 // threading/atomics, storage, callbacks, and consensus orchestration remain
@@ -1418,20 +1449,29 @@ class RaftServer : public TxLogServer {
   friend class RaftTestConfig;  // Allow test config to access private members for kill/restart
   friend class RaftLabTest;     // Allow test cases to access private members for verification
  private:
+  // A server keeps one monotonic clock for its whole lifetime. Production
+  // construction installs SystemRaftClock; the in-memory harness replaces it
+  // before recording startup time.
+  rusty::Option<raft::RaftClockProxy> clock_{rusty::None};
+  rusty::Option<uint64_t> in_memory_election_timeout_us_{rusty::None};
+
+  raft::RaftClockProxy& clock() {
+    verify(clock_.is_some());
+    return clock_.as_mut().unwrap();
+  }
+
   // ============================================================================
   // LOG PERSISTENCE
   // ============================================================================
-  // @unsafe - optional shared storage backend. Kept as std::shared_ptr
-  // because storage implementations are polymorphic legacy boundaries.
-  std::shared_ptr<janus::raft::LogStorage> log_storage_;
+  // @unsafe - facade owns the legacy polymorphic storage backend.
+  janus::raft::LogStorageProxy log_storage_;
   bool async_persistence_ = false;  // Runtime: sync (default) vs async disk persistence
 
   // ============================================================================
   // SNAPSHOT SUPPORT
   // ============================================================================
-  // @unsafe - optional shared snapshot backend; polymorphic and file/RocksDB
-  // backed implementations remain outside early DSL migration.
-  std::shared_ptr<janus::raft::SnapshotManager> snapshot_manager_;
+  // @unsafe - facade owns the legacy polymorphic snapshot backend.
+  janus::raft::SnapshotManagerProxy snapshot_manager_;
   RaftServerTuningCore tuning_core_;
 
   // State machine snapshot callbacks (set by ReplicatedDB or other state machines)
@@ -1442,6 +1482,10 @@ class RaftServer : public TxLogServer {
   // Optional replicated DB (created when MAKO_REPLICATED_DB=1 env var is set).
   // @unsafe - shared state-machine adapter that wraps RocksDB C handles.
   std::shared_ptr<ReplicatedDB> replicated_db_;
+  // Production Setup() leaves this enabled. The named in-memory dependencies
+  // disable it because their reduced contract has no Frame or RaftCommo.
+  bool background_leadership_services_enabled_ = true;
+  bool rule_witness_gc_enabled_ = true;
 
   // @unsafe - Initializes snapshot manager from environment config
   void InitializeSnapshotManager();
@@ -1496,6 +1540,11 @@ class RaftServer : public TxLogServer {
   std::atomic<bool> apply_pending_{false};  // Tracks if new work arrived while applying logs
 #ifdef RAFT_TEST_CORO
   bool failover_{true} ;
+  // The in-memory server harness has no TCP listener, so restart-dispatch
+  // tests supply only the reconnect result while retaining a real server.
+  using ReconnectToSiteForTestHook = bool (*)(void*, siteid_t, parid_t);
+  void* reconnect_to_site_for_test_context_ = nullptr;
+  ReconnectToSiteForTestHook reconnect_to_site_for_test_ = nullptr;
 #else
   bool failover_{true} ;
 #endif
@@ -1506,6 +1555,15 @@ class RaftServer : public TxLogServer {
   bool looping_ = false;
   bool heartbeat_ = true;
   bool heartbeat_setup_ = false;
+
+  // The server is constructed before ServerWorker wires commo_.  Keep the
+  // move-only transport optional until that borrowed communicator exists.
+  rusty::Option<raft::TransportProxy> transport_{rusty::None};
+
+
+  // @unsafe - creates an adapter that borrows the communicator owned by
+  // RaftFrame. It is idempotent because restart paths may call it explicitly.
+  void InitializeTransport();
 	enum { STOPPED, RUNNING } status_;
 	rusty::Function<void(bool)> leader_change_cb_;
 
@@ -1685,8 +1743,6 @@ class RaftServer : public TxLogServer {
             ballot_t term_copy = currentTerm;
             siteid_t voter_copy = site_id_;
             siteid_t can_id_copy = can_id;
-            parid_t par_id_copy = partition_id_;
-
             // Track async persistence thread (joined in destructor to prevent UAF)
             {
               std::lock_guard<std::mutex> lk(async_threads_mtx_);
@@ -1703,15 +1759,13 @@ class RaftServer : public TxLogServer {
                 async_threads_.end());
               auto done = rusty::Arc<rusty::sync::atomic::AtomicBool>::make(false);
               async_threads_.emplace_back(
-                std::thread([this, term_copy, voter_copy, can_id_copy, par_id_copy, done]() {
+                std::thread([this, term_copy, voter_copy, can_id_copy, done]() {
                   // Persist the vote durably
                   PersistState(term_copy, can_id_copy, "doVote: async vote persist");
 
-                  // Send VoteDurable RPC to candidate
-                  auto c = commo();
-                  if (c != nullptr) {
-                      c->SendVoteDurable(can_id_copy, par_id_copy, term_copy, voter_copy);
-                  }
+                  // Send VoteDurable RPC to candidate.
+                  transport()->send_vote_durable(
+                      can_id_copy, raft::VoteDurableReq{term_copy, voter_copy});
                   done->store(true, rusty::sync::atomic::Ordering::Release);
               }), done);
             }
@@ -1784,7 +1838,7 @@ class RaftServer : public TxLogServer {
     {
       const char* why = reason ? reason : "unspecified";
       auto prev_time = last_heartbeat_time_;
-      last_heartbeat_time_ = Time::now(false);
+      last_heartbeat_time_ = clock()->now_us();
       // Log only important timer resets (elections, votes), not routine heartbeats
       if (strcmp(why, "granted vote") == 0 || strcmp(why, "start election timer") == 0) {
         Log_info("[TIMER_RESET] Site {}: reset timer ({}) - prev_hb_time={} new_hb_time={} delta={}",
@@ -1837,12 +1891,99 @@ class RaftServer : public TxLogServer {
    */
   // @safe - election timeout calculation (external calls wrapped in @unsafe blocks)
   uint64_t GetElectionTimeout();
+  bool CheckElectionTimeoutOnce(uint64_t now_us);
  public:
   // @unsafe - returns borrowed communicator pointer from TxLogServer base.
   // The owning RaftFrame/RaftWorker lifetime must outlive this server use.
   RaftCommo* commo() {
     return (RaftCommo*) commo_;
   }
+
+  // @unsafe - delegates TCP reconnection to the externally owned
+  // communicator. The test-only callback makes that result deterministic for
+  // the in-memory live-server harness without constructing real TCP clients.
+  bool ReconnectToSite(siteid_t site_id, parid_t par_id) {
+#ifdef RAFT_TEST_CORO
+    if (reconnect_to_site_for_test_ != nullptr) {
+      return reconnect_to_site_for_test_(reconnect_to_site_for_test_context_,
+                                         site_id, par_id);
+    }
+#endif
+    auto* c = commo();
+    return c != nullptr && c->ReconnectToSite(site_id, par_id);
+  }
+
+#ifdef RAFT_TEST_CORO
+  void SetReconnectToSiteForTest(void* context, ReconnectToSiteForTestHook hook) {
+    reconnect_to_site_for_test_context_ = context;
+    reconnect_to_site_for_test_ = hook;
+  }
+#endif
+
+  // @safe - valid after initialization; callers receive the owned adapter.
+  raft::TransportProxy& transport() {
+    verify(transport_.is_some());
+    return transport_.as_mut().unwrap();
+  }
+
+  // Test-only bootstrap for the in-process ChannelTransport harness. This
+  // deliberately does not call Setup(): production Setup() owns persistence,
+  // Frame/Config discovery, and detached timer fibers. The named dependency
+  // value makes the reduced test contract visible at every call site.
+  // @unsafe - installs externally owned transport/storage dependencies.
+  void InitializeForInMemoryTest(RaftServerInMemoryTestDependencies deps) {
+    verify(!deps.peers.empty());
+    verify(std::find(deps.peers.begin(), deps.peers.end(), deps.site_id) !=
+           deps.peers.end());
+    verify(deps.storage != nullptr);
+    verify(deps.snapshots != nullptr);
+    site_id_ = deps.site_id;
+    loc_id_ = deps.loc_id;
+    partition_id_ = deps.partition_id;
+    clock_ = rusty::Some(std::move(deps.clock));
+    in_memory_election_timeout_us_ = std::move(deps.election_timeout_us);
+    transport_ = rusty::Some(std::move(deps.transport));
+    log_storage_ = janus::raft::make_log_storage_proxy(std::move(deps.storage));
+    snapshot_manager_ =
+        janus::raft::make_snapshot_manager_proxy(std::move(deps.snapshots));
+    current_config().clear();
+    for (const auto peer : deps.peers) {
+      current_config().insert(peer);
+    }
+    learners().clear();
+    stop_ = false;
+    looping_ = true;
+    heartbeat_ = false;
+    heartbeat_setup_ = true;
+    background_leadership_services_enabled_ =
+        deps.enable_background_leadership_services;
+    rule_witness_gc_enabled_ = deps.enable_rule_witness_gc;
+    leadership_core_.set_startup_timestamp(clock()->now_us());
+    RegLearnerAction([](int, janus::Command) { return 0; });
+    StartApplyThread();
+  }
+
+  // @unsafe - runs the existing election path synchronously for the
+  // in-memory harness. The configured transport and peer set are required.
+  bool StartElectionForInMemoryTest() { return RequestVote(); }
+
+  // Checks one election deadline without creating a production timer fiber.
+  // TestCluster invokes this only on the owning PollThread.
+  bool DriveElectionTimerOnceForInMemoryTest() {
+    return CheckElectionTimeoutOnce(clock()->now_us());
+  }
+
+  // Runs one deterministic heartbeat/replication round without creating the
+  // production HeartbeatLoop fiber. It uses the same channel transport and
+  // public RPC handlers, so the test harness exercises real append/commit
+  // logic while avoiding RaftCommo/Frame assumptions.
+  bool DriveReplicationOnceForInMemoryTest();
+
+  // Read-only in-memory lab assertion helper. It verifies the actual command
+  // stored at a committed index instead of letting the harness infer content
+  // from a global index table; divergent Raft histories may reuse an index.
+  bool HasCommittedCommandForInMemoryTest(uint64_t index,
+                                          int command_id);
 
   slotid_t min_active_slot_ = 1; // anything before (lt) this slot is freed
   slotid_t max_executed_slot_ = 0;
@@ -2043,7 +2184,7 @@ class RaftServer : public TxLogServer {
    */
   // @unsafe - moves shared_ptr into member field
   void SetLogStorage(std::shared_ptr<janus::raft::LogStorage> storage) {
-    log_storage_ = std::move(storage);
+    log_storage_ = janus::raft::make_log_storage_proxy(std::move(storage));
   }
 
   /**
@@ -2052,7 +2193,7 @@ class RaftServer : public TxLogServer {
    */
   // @unsafe - returns copy of shared_ptr
   std::shared_ptr<janus::raft::LogStorage> GetLogStorage() const {
-    return log_storage_;
+    return log_storage_.backend();
   }
 
   /**
@@ -2091,7 +2232,8 @@ class RaftServer : public TxLogServer {
    */
   // @unsafe - moves shared_ptr into member field
   void SetSnapshotManager(std::shared_ptr<janus::raft::SnapshotManager> manager) {
-    snapshot_manager_ = std::move(manager);
+    snapshot_manager_ =
+        janus::raft::make_snapshot_manager_proxy(std::move(manager));
   }
 
   /**
@@ -2100,7 +2242,7 @@ class RaftServer : public TxLogServer {
    */
   // @unsafe - returns copy of shared_ptr
   std::shared_ptr<janus::raft::SnapshotManager> GetSnapshotManager() const {
-    return snapshot_manager_;
+    return snapshot_manager_.backend();
   }
 
   /**

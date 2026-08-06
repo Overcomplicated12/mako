@@ -19,8 +19,8 @@ elseif(CMAKE_VERSION VERSION_GREATER_EQUAL "3.31" AND
     set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "0e5b6991-d74f-4b3d-a41c-cf096e0b2508")
 else()
     message(FATAL_ERROR
-        "Unsupported CMake ${CMAKE_VERSION} for C++ `import std;`. "
-        "Use CMake 3.31.x or 4.3.x (see apt_packages.sh).")
+         "Unsupported CMake ${CMAKE_VERSION} for C++ `import std;`. "
+         "Use CMake 3.31.x or 4.3.x (see apt_packages.sh).")
 endif()
 
 # Suppress CMake policy warnings for deprecated modules
@@ -126,6 +126,9 @@ endif()
 set(CMAKE_CXX_FLAGS_INIT "-stdlib=libc++")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-stdlib=libc++ ${MAKO_BREW_LIBCXX_FLAGS}")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-stdlib=libc++ ${MAKO_BREW_LIBCXX_FLAGS}")
+# CMake's import-std probe needs the standard library identity before the
+# CXX compiler is enabled; the compiler flag alone is not enough.
+set(CMAKE_CXX_STANDARD_LIBRARY "libc++")
 
 project(mako)
 
@@ -2302,6 +2305,13 @@ if(BUILD_TESTS)
     target_link_libraries(test_raft_transport_facade ${GTEST_LIBRARIES} ${GTEST_MAIN_LIBRARIES} pthread rrr)
     add_test(NAME test_raft_transport_facade COMMAND test_raft_transport_facade)
 
+    # Phase 8.8a — injectable production/manual monotonic Raft clocks.
+    add_executable(test_raft_clock tests/raft_clock_test.cc)
+    target_include_directories(test_raft_clock PRIVATE ${TEST_INCLUDE_DIRS} ${GTEST_INCLUDE_DIRS})
+    target_compile_options(test_raft_clock PRIVATE ${TEST_COMPILE_OPTIONS})
+    target_link_libraries(test_raft_clock ${GTEST_LIBRARIES} ${GTEST_MAIN_LIBRARIES} pthread rrr)
+    add_test(NAME test_raft_clock COMMAND test_raft_clock)
+
     add_executable(test_raft_rrr_transport_compile tests/raft_rrr_transport_compile_test.cc)
     target_include_directories(test_raft_rrr_transport_compile PRIVATE
         ${TEST_INCLUDE_DIRS}
@@ -2333,6 +2343,14 @@ if(BUILD_TESTS)
     target_link_libraries(test_raft_dispatcher_facade ${GTEST_LIBRARIES} ${GTEST_MAIN_LIBRARIES} pthread rrr)
     add_test(NAME test_raft_dispatcher_facade COMMAND test_raft_dispatcher_facade)
 
+    add_executable(test_raft_server_dispatcher tests/raft_server_dispatcher_test.cc)
+    target_include_directories(test_raft_server_dispatcher PRIVATE ${TEST_INCLUDE_DIRS} ${GTEST_INCLUDE_DIRS})
+    target_compile_options(test_raft_server_dispatcher PRIVATE ${TEST_COMPILE_OPTIONS})
+    target_link_libraries(test_raft_server_dispatcher
+        ${GTEST_LIBRARIES} ${GTEST_MAIN_LIBRARIES} pthread txlog_core_obj
+        yaml-cpp rocksdb lz4 ${CMAKE_DL_LIBS} Python3::Python)
+    add_test(NAME test_raft_server_dispatcher COMMAND test_raft_server_dispatcher)
+
     add_executable(test_raft_channel_transport tests/raft_channel_transport_test.cc)
     target_include_directories(test_raft_channel_transport PRIVATE ${TEST_INCLUDE_DIRS} ${GTEST_INCLUDE_DIRS})
     target_compile_options(test_raft_channel_transport PRIVATE ${TEST_COMPILE_OPTIONS})
@@ -2345,10 +2363,22 @@ if(BUILD_TESTS)
     target_link_libraries(test_raft_memory_snapshot_manager ${GTEST_LIBRARIES} ${GTEST_MAIN_LIBRARIES} pthread rrr)
     add_test(NAME test_raft_memory_snapshot_manager COMMAND test_raft_memory_snapshot_manager)
 
+    add_executable(test_raft_storage_facade tests/raft_storage_facade_test.cc)
+    target_include_directories(test_raft_storage_facade PRIVATE ${TEST_INCLUDE_DIRS} ${GTEST_INCLUDE_DIRS})
+    target_compile_options(test_raft_storage_facade PRIVATE ${TEST_COMPILE_OPTIONS})
+    target_link_libraries(test_raft_storage_facade ${GTEST_LIBRARIES} ${GTEST_MAIN_LIBRARIES} pthread rrr)
+    add_test(NAME test_raft_storage_facade COMMAND test_raft_storage_facade)
+
     add_executable(test_raft_test_cluster tests/raft_test_cluster_test.cc)
-    target_include_directories(test_raft_test_cluster PRIVATE ${TEST_INCLUDE_DIRS} ${GTEST_INCLUDE_DIRS})
+    target_include_directories(test_raft_test_cluster PRIVATE
+        ${TEST_INCLUDE_DIRS}
+        ${GTEST_INCLUDE_DIRS}
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/deptran
+        ${CMAKE_CURRENT_SOURCE_DIR}/third-party/yaml-cpp/include)
     target_compile_options(test_raft_test_cluster PRIVATE ${TEST_COMPILE_OPTIONS})
-    target_link_libraries(test_raft_test_cluster ${GTEST_LIBRARIES} ${GTEST_MAIN_LIBRARIES} pthread rrr)
+    target_link_libraries(test_raft_test_cluster
+        ${GTEST_LIBRARIES} ${GTEST_MAIN_LIBRARIES} pthread txlog_core_obj
+        yaml-cpp rocksdb lz4 ${CMAKE_DL_LIBS} Python3::Python)
     add_test(NAME test_raft_test_cluster COMMAND test_raft_test_cluster)
 
     add_executable(raft_lab_standalone src/deptran/raft/raft_lab_standalone.cc)

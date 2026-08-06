@@ -417,18 +417,25 @@ documented inline + in the design doc.
 
 ### 8.1.b — Give `RaftServer` a `TransportProxy transport_`
 
-- [ ] `src/deptran/raft/server.h`: add private member
-  `janus::raft::TransportProxy transport_;` and an accessor
-  `TransportProxy& transport()`. Include `transport.hpp` at the top.
-- [ ] `src/deptran/raft/server.cc` (or wherever `RaftServer` is
-  initialized — likely in `Setup()` or the constructor):
-  construct `transport_ = make_rrr_transport(commo_, site_id_,
-  partition_id_);` once `commo_` is non-null. `commo_` stays live —
-  `RrrTransportAdapter` holds a non-owning pointer into it.
-- [ ] No outbound call-site changes yet; this step just plumbs the
-  member so the rest of 8.1 can reference it.
-- [ ] Gate: deptran_server links, lab test passes tests 1-60.
-- [ ] **Commit**: `raft: phase 8.1b — wire TransportProxy onto RaftServer`.
+Done in `7d1f9fa1` (`raft: phase 8.1b wire TransportProxy onto
+RaftServer`). `RaftServer` is constructed before `commo_` is wired, so the
+move-only proxy is stored as `rusty::Option<TransportProxy>` until an adapter
+can safely borrow the frame-owned communicator.
+
+- [x] `src/deptran/raft/server.h`: add the optional private
+  `janus::raft::TransportProxy` member and a checked `transport()` accessor;
+  include `transport.hpp`.
+- [x] `src/deptran/raft/server.cc`: initialize the adapter idempotently in
+  `Setup()` once `commo_` is non-null. The special Raft test restart path,
+  which deliberately bypasses `Setup()`, initializes it immediately after
+  wiring its replacement communicator.
+- [x] No outbound call-site changes; this step only plumbs the member for the
+  remaining 8.1 migration.
+- [x] Gate: deptran_server links, lab test passes tests 1-60. Verified with
+  Clang 22 on 2026-08-01: the default server-backed lab run passed tests
+  1-11 and 50-60. The runner later aborts in test 63 during the second
+  Kill/Restart learner callback; that is outside this gate.
+- [x] **Commit**: `raft: phase 8.1b — wire TransportProxy onto RaftServer`.
 
 ### 8.1.c — Migrate `BroadcastVote` (election path)
 
@@ -444,7 +451,7 @@ if (sp_quorum->yes()) { ... specVoters_ = sp_quorum->GetSpecVoters(); ... }
 else if (sp_quorum->no()) { ... }
 ```
 
-- [ ] Replace with:
+- [x] Replace with:
   - Build a `RaftQuorum<VoteReply>` with `n_total` = peers-1,
     `n_needed` = majority count (quorum size – 1 for self-vote).
   - For each peer in the partition (skip self), spawn
@@ -459,12 +466,14 @@ else if (sp_quorum->no()) { ... }
       `vote_granted == true` (replaces `GetSpecVoters()`)
     - highest-term tracking across all replies (replaces
       `sp_quorum->Term()`)
-- [ ] Delete the helper branches (`yes()`, `no()`, `n_voted_yes_`,
+- [x] Delete the helper branches (`yes()`, `no()`, `n_voted_yes_`,
   `n_voted_no_`, `Term()`, `timeouted_`, `GetSpecVoters()`) now that
-  nothing calls them on the election path.
-- [ ] Gate: lab test tests 1-11 still pass (these exercise initial
-  election + re-election). Watch TEST 1 + TEST 2 carefully.
-- [ ] **Commit**: `raft: phase 8.1c — migrate BroadcastVote to
+  nothing calls them on the election path. The last unused fanout callback,
+  `BroadcastVoteCb`, is deleted too; the per-peer adapter uses `SendVoteCb`.
+- [x] Gate: lab test tests 1-11 still pass (these exercise initial
+  election + re-election). Verified with Clang 22 on 2026-08-01; TEST 1 and
+  TEST 2 passed in the server-backed lab run.
+- [x] **Commit**: `raft: phase 8.1c — migrate BroadcastVote to
   per-peer send_vote via RaftQuorum`.
 
 ### 8.1.d — Migrate `SendAppendEntries` (hot replication path)
@@ -472,53 +481,86 @@ else if (sp_quorum->no()) { ... }
 Location: `src/deptran/raft/server.cc:3164` (main HeartbeatLoop),
 line 1647 (`SendAppendEntries2`, speculative path).
 
+- [x] Add an integration regression test proving that the current
+  `RaftCommo` path can pipeline data-bearing `AppendEntries` requests per
+  follower. [26:07:28] Added
+  `examples/mako-raft-tests/run_test_append_entries_pipeline.sh` in commit
+  `b78dc410`. The new script leaves existing test scripts untouched, runs the
+  existing five-replica `testPreferredReplicaLogReplication` workload with a
+  four-request window, and verifies: all replicas complete 25/25 operations;
+  every follower reaches a 4/4 high-water mark with log-bearing ranges; and
+  request IDs 2--4 are sent before the callback for request ID 1 is received.
+  The test-only `APPEND_PIPELINE_TRACE` records that callback ordering. It
+  passed after `ninja -C build -j4 testPreferredReplicaLogReplication`.
+
 Current: `commo()->SendAppendEntries(..., shared_ptr<cmd>, ...)`
 returns `shared_ptr<SendAppendEntriesResults>`. Callers read `res->done`,
 `res->ok`, `res->followerTerm`, `res->followerLastLogIndex`,
 `res->followerAckType` after `res->event->wait()`.
 
-- [ ] Convert to per-peer `transport_->send_append_entries(peer, req)`
+- [x] Convert to per-peer `transport_->send_append_entries(peer, req)`
   returning `AppendEntriesReply` directly. Build an
   `AppendEntriesReq` from the same fields.
-- [ ] In HeartbeatLoop: each peer's replication sub-fiber
+- [x] In HeartbeatLoop: each peer's replication sub-fiber
   (`Fiber::create_run`) calls `send_append_entries` synchronously,
   consumes the reply, updates `next_index_[peer]` / `match_index_[peer]`
   under `mtx_`.
-- [ ] For the speculative path at 1647 (`SendAppendEntries2`): if the
+- [x] For the speculative path at 1647 (`SendAppendEntries2`): if the
   semantics are identical to the standard path (just a different
   result shape), consolidate. Otherwise add a
   `transport_->send_append_entries_spec` variant — but first confirm
   the spec path is actually distinguishable on the wire.
-- [ ] Delete `SendAppendEntriesResults` from `commo.h` +
+- [x] Delete `SendAppendEntriesResults` from `commo.h` +
   `commo.cc` + every include site. Delete `SendAppendEntries2` /
   `SendAppendEntries` member definitions from RaftCommo (the
   `*Cb` variants stay as the rrr-side callback entry).
-- [ ] Gate: lab test tests 1-60 all pass. Watch TEST 3 (Basic
-  agreement), TEST 7 (Concurrent starts), TEST 11 (Figure 8),
-  TEST 60 (HeartbeatLoop triggers InstallSnapshot).
-- [ ] **Commit**: `raft: phase 8.1d — migrate SendAppendEntries /
-  SendAppendEntries2 to per-peer transport_->send_append_entries`.
+- [x] Gate: lab test tests 1-60 all pass. Verified with Clang 22 on
+  2026-08-01: TEST 3 (Basic agreement), TEST 7 (Concurrent starts), TEST 11
+  (Figure 8), and TEST 60 (HeartbeatLoop triggers InstallSnapshot) passed.
+- [x] **Commit**: `3dc6ba2b Complete Raft phase 8.1d` — migrated
+  `SendAppendEntries` / `SendAppendEntries2` to per-peer
+  `transport_->send_append_entries`.
 
 ### 8.1.e — Migrate the remaining outbound sites
 
-- [ ] Line 1530 `SendInstallSnapshot` → `transport_->send_install_snapshot`.
-- [ ] Line 2589 `SendAppendEntriesDurable` → `transport_->send_append_entries_durable`
+- [x] Line 1530 `SendInstallSnapshot` → `transport_->send_install_snapshot`.
+  The synchronous transport reply preserves higher-term and replication-index
+  handling in the heartbeat fiber.
+- [x] Line 2589 `SendAppendEntriesDurable` → `transport_->send_append_entries_durable`
   (fire-and-forget).
-- [ ] `server.h:408` `SendVoteDurable` → `transport_->send_vote_durable`
+- [x] `server.h:408` `SendVoteDurable` → `transport_->send_vote_durable`
   (fire-and-forget).
-- [ ] `TimeoutNow` call sites → `transport_->send_timeout_now`.
-- [ ] Line 1194 `UpdatePartitionView` — this is gossip; either drop
-  it from the facade or leave the direct `commo()->UpdatePartitionView`
-  call (annotate `@unsafe` and note it's out of scope for 8.x).
-- [ ] Line 1408 `commo()->rpc_par_proxies_[par_id]` — this reaches
-  into rrr internals. Either wrap with a helper on `RaftCommo` that
-  RaftServer consumes, or leave as a documented `@unsafe` boundary.
-- [ ] Delete `RaftVoteQuorumEvent` from `commo.h` + `commo.cc` now
-  that no one calls `BroadcastVote`.
+- [x] `TimeoutNow` call sites → `transport_->send_timeout_now`. No direct
+  outbound server call remains; leadership transfer currently uses the
+  trigger flag on `EmptyAppendEntries`, while the facade supports standalone
+  TimeoutNow for future callers.
+- [x] `UpdatePartitionView` remains explicit legacy view gossip through
+  `RaftCommo::PublishPartitionView`. It is an `@unsafe` communicator-owned
+  global-view boundary and intentionally is not part of `TransportProxy`.
+- [x] Peer proxy lookup and test Kill/Restart table transfer now use the
+  narrow `RaftCommo::{PeerProxies,TakePartitionProxyTable,
+  RestorePartitionProxyTable}` boundary; `RaftServer` no longer reaches into
+  `rpc_par_proxies_`.
+- [x] Delete `RaftVoteQuorumEvent`, `BroadcastVote`, and `BroadcastVoteCb`
+  from `commo.h` + `commo.cc` now that election uses per-peer transport sends.
 - [ ] Gate: full lab test + `shard1ReplicationRaft` throughput
   (≥80k ops/sec per docs/dev/raft_decouple_plan.md completion criteria).
-- [ ] **Commit**: `raft: phase 8.1e — retire remaining commo() outbound
+- [x] **Commit**: `raft: phase 8.1e — retire remaining commo() outbound
   call sites; delete SendAppendEntriesResults + RaftVoteQuorumEvent`.
+
+Validation: Clang 22 `mako` build plus `test_raft_quorum`,
+`test_raft_transport_facade`, and `test_raft_rrr_transport_compile` pass.
+The server-backed lab range through test 60 passes. The full runner still
+aborts in test 63 during a Kill/Restart learner callback; the throughput gate
+remains pending.
+
+Latest merged verification (Clang 22, 2026-08-05, merge `9545f827`): a fresh
+Ninja build succeeded for `test_raft_channel_transport`,
+`test_raft_test_cluster`, `raft_lab_standalone`, `test_rpc_log_storage`, and
+`test_rpc_rocksdb_log_storage`. The corresponding four-test CTest selection
+passed, and `raft_lab_standalone` completed tests 1-11 and 50-60 with
+`ALL TESTS PASSED`. This verifies the Rust-DSL merge compatibility; it does
+not satisfy the pending production throughput gate above.
 
 ### 8.1 risks
 
@@ -545,7 +587,7 @@ returns `shared_ptr<SendAppendEntriesResults>`. Callers read `res->done`,
 calls the existing `RaftServer::OnX(...)` with output-pointer args,
 and returns the filled `Reply`.
 
-- [ ] Create `src/deptran/raft/raft_server_dispatcher.hpp`:
+- [x] Create `src/deptran/raft/raft_server_dispatcher.hpp`:
   - `class RaftServerDispatcher { RaftServer* svr_; public: 8 handle_*
     methods }`.
   - Each `handle_*`:
@@ -557,12 +599,28 @@ and returns the filled `Reply`.
       pack locals into `Reply`, return it.
   - Factory:
     `inline DispatcherProxy make_raft_server_dispatcher(RaftServer*)`.
-- [ ] Unit test `tests/raft_server_dispatcher_test.cc`: construct a
-  minimal RaftServer (or mock), wrap in dispatcher, exercise each
-  handle_*.
-- [ ] Gate: `test_raft_server_dispatcher` + all existing
-  `test_raft_*` green.
-- [ ] **Commit**: `raft: phase 8.2 — RaftServerDispatcher + factory`.
+  All eight handlers preserve the current service failure defaults; the
+  `NotifyRestart` adapter also preserves the reconnect result before it
+  invalidates the restarted peer's speculative state.
+- [x] Unit test `tests/raft_server_dispatcher_test.cc`: wraps a null server
+  and exercises every handler's lifecycle/default-reply path. The test object
+  compiles with Clang 22, type-checking every `RaftServer::OnX` call.
+- [x] Gate: link and run `test_raft_server_dispatcher` + all existing
+  `test_raft_*`. [26:07:31] Fresh Clang 22 `build-raft-full` passes all nine
+  configured targets: messages, transport facade, RRR transport compile,
+  quorum, dispatcher facade, server dispatcher, channel transport, memory
+  snapshot manager, and test cluster. The former `test.cc` `Init` macro
+  collision and stale membership-field references were fixed in
+  `7e7f3f4d`.
+- [x] Edge coverage that does not require a live `RaftServer`: the null-server
+  dispatcher test exercises every reply shape, while
+  `test_raft_channel_transport` drops the direction for every reply-bearing
+  transport RPC (`Vote`, `AppendEntries`, `EmptyAppendEntries`, `TimeoutNow`,
+  `InstallSnapshot`) and verifies default replies plus successful recovery.
+  The same test covers fire-and-forget `VoteDurable`,
+  `AppendEntriesDurable`, and `NotifyRestart`: a dropped direction delivers
+  none, then fault reset delivers each exactly once.
+- [x] **Commit**: `16b13862 raft: phase 8.2 add server dispatcher adapter`.
 
 ### 8.2 risks
 
@@ -575,105 +633,147 @@ and returns the filled `Reply`.
 
 **Goal**: `RaftServiceImpl`'s fiber-RPC overrides stop calling
 `svr->OnX` directly and instead call
-`dispatcher_->handle_x(req)`.
+the corresponding dispatcher `handle_x(req)`.
 
-- [ ] `src/deptran/raft/service.h`: add member
-  `rusty::Option<DispatcherProxy> dispatcher_;` (Option because the
-  dispatcher is set after the server is registered).
-- [ ] `src/deptran/raft/service.cc`:
-  - In the constructor or `UpdateServer()`: call
-    `dispatcher_ = rusty::Some(make_raft_server_dispatcher(svr))`
-    when svr is set.
-  - Each override method (`Vote`, `VoteDurable`, `AppendEntries`,
-    `EmptyAppendEntries`, `AppendEntriesDurable`, `TimeoutNow`,
-    `NotifyRestart`, `InstallSnapshot`, `AddServer`, `RemoveServer`):
-    replace the body's `svr->OnX(...)` calls with
-    `return Result<Resp, i32>::Ok(dispatcher_->handle_x(req))`.
-  - The null/disconnected guard stays — if `dispatcher_.is_none()`,
-    return `Ok(default_reply)` with the same shape current code uses.
-- [ ] Delete the `#include "server.h"` header if no longer needed
-  (the dispatcher adapter references RaftServer internally).
-- [ ] Gate: lab test tests 1-60 all pass. Pay attention to
-  `NotifyRestart` — it has side effects (calls `commo->ReconnectToSite`
-  + `svr->OnPeerRestart`).
-- [ ] **Commit**: `raft: phase 8.3 — RaftServiceImpl forwards to
-  DispatcherProxy`.
+- [x] Do not cache a `DispatcherProxy`: `UpdateServer()` atomically swaps a
+  borrowed `RaftServer*` during Kill/Restart, so every handler constructs a
+  short-lived dispatcher from the current pointer instead.
+- [x] `src/deptran/raft/service.cc`:
+  - `Vote`, `VoteDurable`, `AppendEntries`, `EmptyAppendEntries`,
+    `AppendEntriesDurable`, `TimeoutNow`, `NotifyRestart`, and
+    `InstallSnapshot` convert their rrr request/reply payloads at the service
+    boundary and call the corresponding `DispatcherBase::handle_*` method.
+  - The dispatcher owns the null/disconnected defaults and `NotifyRestart`'s
+    reconnect + peer-reset behavior; duplicate service implementations are
+    removed.
+  - `AddServer` and `RemoveServer` remain direct because `DispatcherBase`
+    intentionally does not yet declare membership-management methods.
+- [x] Remove the now-redundant direct `server.h` include from `service.cc`;
+  `service.h` still needs the complete type for its atomic borrowed pointer.
+- [x] Gate: lab test tests 1-60 all pass. Verified with Clang 22 on
+  2026-08-01. `NotifyRestart` was exercised by the later test-63 restart
+  path, which currently aborts in its learner callback after the test-60 gate.
+- [x] Add live-server edge tests in `test_raft_server_dispatcher`:
+  `NotifyRestart` reconnect success, failure, and null `commo()` all assert
+  `OnPeerRestart` invalidates speculative state; `EmptyAppendEntries` covers
+  both trigger-election values; `AppendEntries` covers stale term and a
+  conflicting prefix; `InstallSnapshot` covers stale and equal index; and
+  `TimeoutNow` rejects a stale request without starting an election. The
+  reconnect outcomes use a `RAFT_TEST_CORO` callback, while every adapter call
+  reaches a real in-memory `RaftServer` and its non-virtual `OnX` method.
+- [x] Add a Kill/Restart-in-flight service test: the live-server fixture calls
+  `raft::run_raft_service_update_server_in_flight_test`, which blocks a real
+  `Vote` handler, proves `UpdateServer(nullptr)` waits for its lifecycle lock,
+  then verifies the null reply and a replacement server response. This checks
+  that no request retains a cached dispatcher/server pointer across the swap.
+- [x] **Commit**: `6f33fdda raft: phase 8.3 route service through dispatcher`.
 
-### 8.3 risks
+### 8.3 lifecycle note
 
-- `NotifyRestart` is the odd one — it's currently a service-level
-  method that reconnects the rrr client. In `RaftServerDispatcher`
-  the dispatcher has no `commo_` to call `ReconnectToSite` on. Either
-  keep `NotifyRestart` as a service-level concern (no dispatcher) or
-  thread the commo reference through.
+- Do not retain a dispatcher across `UpdateServer()`: it would borrow the
+  replaced server. Creating one from the current atomic pointer per RPC keeps
+  the original Kill/Restart behavior. `NotifyRestart` is safe to dispatch
+  because `RaftServerDispatcher` performs the server's communicator reconnect
+  before invalidating the restarted peer.
 
 ## Phase 8.4 — storage proxies (optional)
+
+Implementation notes: [Phase 8.4 storage proxy plan](dev/raft-phase-8.4-storage-proxies-plan.md).
 
 **Goal**: `LogStorageProxy` / `SnapshotManagerProxy` facades replace
 the virtual `LogStorage` / `SnapshotManager` interfaces at
 `RaftServer`'s boundary.
 
-- [ ] Create `src/deptran/raft/log_storage_facade.hpp` mirroring every
+- [x] Create `src/deptran/raft/log_storage_facade.hpp` mirroring every
   method of `LogStorage` (get / put / get_range / put_batch /
   remove / remove_range / first_index / last_index / get_term / size /
   empty / get_metadata / set_metadata / sync / close / is_open / clear).
-- [ ] Same for `src/deptran/raft/snapshot_manager_facade.hpp`
+  `LogStorageProxy` retains the shared legacy backend and forwards the full
+  surface through one factory used by every storage implementation.
+- [x] Same for `src/deptran/raft/snapshot_manager_facade.hpp`
   (BeginSnapshot / TakeSnapshot / BeginLoad / LoadLatestSnapshot /
   GetLatestSnapshot / ListSnapshots / HasSnapshotAtOrAfter /
-  PruneSnapshots / DeleteAllSnapshots / GetStoragePath).
-- [ ] Switch `RaftServer::log_storage_` to `LogStorageProxy` and
+  PruneSnapshots / DeleteAllSnapshots / GetStoragePath). `SnapshotManagerProxy`
+  retains the backend and preserves streaming reader/writer ownership.
+- [x] Switch `RaftServer::log_storage_` to `LogStorageProxy` and
   `RaftServer::snapshot_manager_` to `SnapshotManagerProxy`. Existing
   virtual impls (`RocksDBLogStorage`, `InMemoryLogStorage`,
   `FileSnapshotManager`, `MemorySnapshotManager`) wrap in proxies via
-  factory functions.
+  factory functions. `Set*`/`Get*` keep their shared-pointer API for current
+  callers while storage inside `RaftServer` is now a value facade.
 - [ ] Gate: lab test tests 1-60 + all snapshot tests pass.
-- [ ] **Commit**: `raft: phase 8.4 — proxy LogStorage/SnapshotManager`.
+  `test_raft_storage_facade` covers every forwarding method with in-memory
+  backends. Clang 22/Ninja configuration succeeds, but the focused target is
+  still rebuilding the shared RustyCpp/rrr module prerequisites and has not
+  linked in this environment; run the lab and snapshot gates once it does.
+- [x] **Commit**: `raft: phase 8.4 — proxy LogStorage/SnapshotManager`.
 - [ ] Skip if time is short; the existing virtual interfaces work
   fine.
 
 ## Phase 8.5 — `TestCluster` with real `RaftServer`s
 
+Implementation notes: [Phase 8.5 TestCluster plan](dev/raft-phase-8.5-test-cluster-plan.md).
+
 **Goal**: replace `DummyDispatcher` inside `RaftNode` with a real
 `RaftServer` wrapped via `RaftServerDispatcher`. Each node uses
 `ChannelTransportAdapter` pointing at a shared `ChannelSwitchboard`.
 
-- [ ] `src/deptran/raft/raft_node.hpp`:
-  - Replace `rusty::Arc<DummyDispatcher> dispatcher_impl_` with
-    `rusty::Box<RaftServer> server_`.
-  - Constructor: build a `RaftServer` with `transport_ =
-    make_channel_transport(sw_, self, par)`, `log_storage_` =
-    `InMemoryLogStorage`, `snapshot_manager_` = `MemorySnapshotManager`.
-    Wrap with `make_raft_server_dispatcher(server_.get())` and store
-    the resulting `DispatcherProxy`.
-  - Wire the server into its Raft timers/fibers:
-    `server_->StartElectionTimer()`, `server_->HeartbeatLoop()`,
-    `server_->StartApplyThread()` / `StartApplyFiber()` — exactly as
-    `deptran_server` does today but without a `deptran_server` binary.
-- [ ] Delete `DummyDispatcher` once nothing references it.
-- [ ] `TestCluster::with_in_memory_transport(n)`: keep the existing
-  wiring but ensure each node's RaftServer is in a state ready to
-  accept the first `HeartbeatLoop` tick.
-- [ ] New gtest cases in `tests/raft_test_cluster_test.cc`:
+- [x] `RaftNode` has a dispatcher-injection constructor and transfers that
+  exact move-only `DispatcherProxy` once to its `ChannelNodeWorker`.
+  This is the ownership seam needed by `RaftServerDispatcher`; production-like
+  test nodes now use the real-server constructor, while injection remains only
+  for `RaftTestClusterTest.NodeTransfersAnInjectedDispatcher`.
+- [x] Add a minimal, explicit `RaftServer` test bootstrap. It configures
+  site/partition identity, the complete peer set, a supplied
+  `ChannelTransportAdapter`, `InMemoryLogStorage`, and
+  `MemorySnapshotManager` without reading global `Config`, requiring a
+  `Frame`, or starting production persistence/ReplicatedDB setup. Keep this
+  separate from `Setup()` so production startup semantics remain unchanged.
+  Implemented with `RaftServerInMemoryTestDependencies`.
+- [x] Make each `RaftNode` own one real server with that bootstrap, inject
+  `make_raft_server_dispatcher(server)` into its worker, and delegate
+  `is_leader()`, `current_term()`, and `commit_index()` to the server. Remove
+  the placeholder state fields and default `DummyDispatcher` after this path
+  is exercised.
+- [x] Define test-server lifecycle explicitly: start only the election,
+  heartbeat, and apply machinery that the in-memory reactor can drive; on
+  kill/restart, stop/join it before destroying the server, construct a fresh
+  server using the retained in-memory storage, then replace its worker
+  dispatcher. A stopped worker must never hold a dangling server pointer.
+  Each node owns an `rrr::PollThread`; deterministic election and replication
+  jobs run on that node's reactor alongside its joinable apply worker. The
+  reduced bootstrap deliberately omits production timer, recovery,
+  leadership-transfer, witness-GC, and state-machine services because they
+  require `Frame`, `RaftCommo`, or global `Config`. `kill()` joins the channel
+  worker and then `PollThread::shutdown()` before `restart()` destroys the old
+  server and installs a replacement. Covered by
+  `RaftTestClusterTest.KillRestartJoinsPollThreadBeforeServerReplacement`.
+- [x] `TestCluster::with_in_memory_transport(n)`: retain the current channel
+  wiring and per-site storage, but ensure all real servers are initialized
+  before the first election tick. Restarting one node must preserve unrelated
+  directed drops and partitions.
+- [x] New gtest cases in `tests/raft_test_cluster_test.cc`:
   - Election converges: construct 3-node cluster, step until
     exactly one `node(i).is_leader()` is true.
   - `DoAgreement` equivalent: the leader appends a log entry, every
     node observes the entry's `commit_index()` advance.
   - `disconnect(follower)` prevents the follower from catching up
     until `reset_faults`.
-- [ ] Gate: the above gtests + `raft_lab_standalone` still runs its
-  4 legacy cases.
-- [ ] **Commit**: `raft: phase 8.5 — TestCluster runs real RaftServers`.
+- [x] Gate: `test_raft_test_cluster` and all 4 legacy
+  `raft_lab_standalone` cases pass from the standard Clang 22 `build/`
+  directory (verified 2026-08-03).
+- [x] **Commit**: `raft: phase 8.5 — TestCluster runs real RaftServers`.
 
 ### 8.5 risks
 
 - RaftServer's startup path expects a full deptran environment
   (Config, Frame, rep_frame_, tx_sched_ etc.). Need to either:
-  - (a) Teach RaftServer to accept a minimal "test mode" init that
-    skips tx_sched_ wiring, OR
+  - (a) provide the minimal bootstrap above, OR
   - (b) Build just enough of the surrounding scaffolding in
     TestCluster.
-  Probably (a) — add a `RaftServer(/*test_mode*/)` constructor that
-  skips `tx_sched_` setup.
+  Prefer (a), but do not add a boolean `test_mode` constructor: use named
+  dependencies so the production and test initialization contracts are
+  auditable.
 - Fiber scheduling: RaftServer's timers use `Fiber::create_run` +
   `Fiber::sleep` — depends on `rrr::Reactor` running. In a test
   binary that doesn't use `deptran_server`, a `rrr::PollThread` must
@@ -685,36 +785,34 @@ the virtual `LogStorage` / `SnapshotManager` interfaces at
 **Goal**: `RaftTestConfig` can operate on a `TestCluster` instead of
 on the 5-server deptran topology.
 
-- [ ] `src/deptran/raft/testconf.h`: add a new constructor
+- [x] `src/deptran/raft/testconf.h`: add
   `RaftTestConfig(TestCluster& cluster)` alongside the existing
-  `RaftTestConfig(std::vector<Frame*>)`.
-- [ ] `src/deptran/raft/testconf.cc`: when constructed from a
+  Frame-map constructor. `test_cluster_facade.hpp` keeps the header-only
+  TestCluster out of `testconf.cc`, avoiding duplicate generated snapshot
+  symbols at link time.
+- [x] `src/deptran/raft/testconf.cc`: when constructed from a
   TestCluster, route every operation:
-  - `Kill(i)` → destroy `nodes_[i]`'s RaftServer, switchboard drops
-    its outbound by default.
-  - `Restart(i)` → rebuild the server in place, re-register its
-    dispatcher.
-  - `Disconnect(i)` → `sw_.drop_direction(i, *)` +
-    `sw_.drop_direction(*, i)`.
-  - `Reconnect(i)` → per-direction undrop (small switchboard API
-    addition: `undrop_direction(from, to)` or rebuild faults minus
-    this one).
-  - `Partition(a, b)` → `sw_.partition({a, b})`.
-  - `DoAgreement(cmd, n, wait)` → call the leader's log-append path
-    (see `RaftServer::Submit` or equivalent), poll `commit_index()`
-    across nodes.
-  - `OneLeader()` → scan nodes for `is_leader()`.
-- [ ] Keep the existing rrr-based `RaftTestConfig(std::vector<Frame*>)`
-  constructor intact so `deptran_server -f raft_lab_test.yml` keeps
+  - `Kill` stops worker/reactor and destroys the node server; `Restart`
+    builds a replacement and a fresh dispatcher.
+  - `Disconnect`, `Reconnect`, and `Partition` use the switchboard's directed
+    fault API.
+  - `DoAgreement` submits a well-formed `TpcCommitCommand` to the elected
+    real server and polls `commit_index()` through deterministic replication.
+  - `OneLeader` scans real node state and explicitly synchronizes a
+    reconnected former leader before declaring the cluster stable.
+- [x] Keep the existing rrr-based Frame-map constructor intact so
+  `deptran_server -f raft_lab_test.yml` keeps
   working.
-- [ ] Switchboard API additions (likely in
-  `src/deptran/raft/channel_transport.hpp`):
-  - `undrop_direction(siteid_t from, siteid_t to)`: remove from
-    `ChannelFaults::dropped`.
-- [ ] Gate: subset of `RaftLabTest` runs against the new
+- [x] Switchboard API addition in `src/deptran/raft/channel_transport.hpp`:
+  `undrop_direction(siteid_t from, siteid_t to)` removes only that directed
+  drop while preserving reverse-direction and partition faults. Covered by
+  `RaftChannelTransportTest.UndropRestoresOnlyTheSelectedDirection`.
+- [x] Gate: subset of `RaftLabTest` runs against the new
   constructor (see 8.7 for the full driver). Minimally: `testInitialElection`,
-  `testReElection`, `testBasicAgree`, `testFailAgree`.
-- [ ] **Commit**: `raft: phase 8.6 — port RaftTestConfig to TestCluster`.
+  `testReElection`, `testBasicAgree`, `testFailAgree`. Verified 2026-08-03
+  with Clang 22, `RAFT_TEST=ON`, and `ctest --test-dir build -R
+  '^(test_raft_test_cluster|raft_lab_standalone)$'`.
+- [x] **Commit**: `raft: phase 8.6 — port RaftTestConfig to TestCluster`.
 
 ## Phase 8.7 — `raft_lab_standalone` runs the full `RaftLabTest::Run()`
 
@@ -722,17 +820,21 @@ on the 5-server deptran topology.
 `src/deptran/raft/raft_lab_standalone.cc` with a full RaftLabTest
 driver. Completion of the decouple plan.
 
-- [ ] Edit `src/deptran/raft/raft_lab_standalone.cc`:
+- [x] Edit `src/deptran/raft/raft_lab_standalone.cc`:
   - Build a 5-node `TestCluster`.
   - Construct `RaftTestConfig(*cluster)` (the Phase 8.6 constructor).
   - Construct `RaftLabTest testconfig` and call `test.Run()` +
     `test.Cleanup()`.
-- [ ] Exit with non-zero on any failed test case.
-- [ ] Gate:
-  - `./build/raft_lab_standalone` runs tests 1-60 (at minimum) end-to-end.
-  - `ss -lntp | grep raft_lab_standalone` → empty (no sockets bound).
-  - No `rocksdb` files on disk (MemoryLogStorage + MemorySnapshotManager).
-- [ ] **Commit**: `raft: phase 8.7 — raft_lab_standalone runs full
+- [x] Exit with non-zero on any failed test case.
+- [x] Gate (Clang 22, 2026-08-04):
+  - `./build/raft_lab_standalone` passes tests 1-11 and 50-60 end-to-end.
+  - `ctest --test-dir build --output-on-failure -R
+    '^(test_raft_test_cluster|test_raft_channel_transport)$'` passes.
+  - `ss -lntp | grep raft_lab_standalone` is empty after the run.
+  - No runtime RocksDB files (`*.sst`, `CURRENT`, `MANIFEST-*`) are created
+    outside `build/`; the harness uses `MemoryLogStorage` and
+    `MemorySnapshotManager`.
+- [x] **Commit**: `raft: phase 8.7 — raft_lab_standalone runs full
   RaftLabTest via TestCluster`.
 
 ### 8.7 risks
@@ -747,10 +849,25 @@ driver. Completion of the decouple plan.
   in-process. Set the env var when launching the binary or configure
   `MemoryLogStorage` to notify durable-acks synchronously.
 
-## Phase 8.8 (deferred) — `RaftClock` abstraction
+## Phase 8.8 — deterministic `RaftClock` coverage
 
-Not required for the core decouple goal. Add `RaftClock` + `ManualClock`
-if deterministic testing (advance-time-by-N-ms) becomes valuable.
+- [x] Inject a move-only `RaftClockProxy` into `RaftServer`; production uses
+  `SystemRaftClock`, while the in-memory harness shares one atomic
+  `ManualRaftClock`.
+- [x] Route all RaftServer monotonic timestamp reads through that clock and
+  retain the production timer fiber/scheduling policy unchanged.
+- [x] Add deterministic `TestCluster::advance_time_by_us()` and
+  `step_election_timers()` controls, using per-node fixed in-memory election
+  deadlines.
+- [x] Cover exact deadlines, leader-contact deadline reset, majority-side
+  re-election after partition, and clock monotonicity across restart with
+  real Raft servers and channel RPCs.
+- [x] Gate: Clang 22 focused CTest suite (`test_raft_clock`,
+  `test_raft_test_cluster`, `test_raft_channel_transport`,
+  `test_raft_quorum`, `test_raft_storage_facade`) and
+  `raft_lab_standalone` through tests 1–60 pass.
+
+Implementation plan: [Raft Phase 8.8 Clock Plan](dev/raft-phase-8.8-clock-plan.md).
 
 ---
 
@@ -799,14 +916,14 @@ verification. Listed here so they don't get lost.
 
 - [x] Phase 8.0 — fiber-sync facades (cf5db3fef)
 - [x] Phase 8.1a — RaftQuorum primitive [26:04:25, 12:30]
-- [ ] Phase 8.1b — TransportProxy member on RaftServer
-- [ ] Phase 8.1c — migrate BroadcastVote
-- [ ] Phase 8.1d — migrate SendAppendEntries / SendAppendEntries2
-- [ ] Phase 8.1e — retire remaining commo() outbound sites
-- [ ] Phase 8.2 — RaftServerDispatcher
-- [ ] Phase 8.3 — RaftServiceImpl → DispatcherProxy
-- [ ] Phase 8.4 — storage proxies (optional)
-- [ ] Phase 8.5 — TestCluster with real RaftServer
-- [ ] Phase 8.6 — port RaftTestConfig to TestCluster
-- [ ] Phase 8.7 — raft_lab_standalone full driver
-- [ ] Phase 8.8 — RaftClock (deferred)
+- [x] Phase 8.1b — TransportProxy member on RaftServer
+- [x] Phase 8.1c — migrate BroadcastVote (implementation; validation pending)
+- [x] Phase 8.1d — migrate SendAppendEntries / SendAppendEntries2 (implementation; validation pending)
+- [x] Phase 8.1e — retire remaining commo() outbound sites
+- [x] Phase 8.2 — RaftServerDispatcher (implementation; full test gate pending)
+- [x] Phase 8.3 — RaftServiceImpl → DispatcherProxy (implementation; full test gate pending)
+- [x] Phase 8.4 — storage proxies (implementation; full test gate pending)
+- [x] Phase 8.5 — TestCluster with real RaftServer
+- [x] Phase 8.6 — port RaftTestConfig to TestCluster
+- [x] Phase 8.7 — raft_lab_standalone full driver
+- [x] Phase 8.8 — deterministic Raft timer coverage

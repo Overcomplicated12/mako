@@ -10,9 +10,8 @@
 #include <rusty/arc.hpp>
 #include <rusty/cell.hpp>
 #include <rusty/mutex.hpp>
+#include <rusty/rusty.hpp>
 #include <rusty/slice.hpp>
-
-import rusty;
 
 // @external: {
 //   Log_info: [safe, (...) -> void],
@@ -89,160 +88,6 @@ inline bool commo_notify_restart_is_down(NotifyRestartStatus status) {
     return status == NotifyRestartStatus::DOWN;
 }
 /*RUSTYCPP:GEN-END id=commo.notify_restart_helpers*/
-
-#if RUSTYCPP_RUST
-pub fn commo_quorum_should_record_vote(vote_yes: bool, voter_id: u16) -> bool {
-    vote_yes && voter_id != 0
-}
-
-pub fn commo_quorum_should_advance_term(term: u64, highest_term: u64) -> bool {
-    term > highest_term
-}
-#endif
-/*RUSTYCPP:GEN-BEGIN id=commo.quorum_decisions version=1 rust_sha256=19672f928ad7ccafc3eff033ad9b0e0f264846beeda995bb311705d367052a3c*/
-inline bool commo_quorum_should_record_vote(bool vote_yes, uint16_t voter_id);
-inline bool commo_quorum_should_advance_term(uint64_t term, uint64_t highest_term);
-
-inline bool commo_quorum_should_record_vote(bool vote_yes, uint16_t voter_id) {
-    return rusty::detail::deref_if_pointer_like(vote_yes) && (rusty::detail::deref_if_pointer_like(voter_id) != static_cast<uint16_t>(0));
-}
-
-inline bool commo_quorum_should_advance_term(uint64_t term, uint64_t highest_term) {
-    return rusty::detail::deref_if_pointer_like(term) > rusty::detail::deref_if_pointer_like(highest_term);
-}
-/*RUSTYCPP:GEN-END id=commo.quorum_decisions*/
-
-// @unsafe - owns the flattened QuorumEvent through the upstream composition
-// wrapper and tracks voters in a Rusty mutex.
-class RaftVoteQuorumEvent: public QuorumEventWrapper {
- private:
-  // SPECULATIVE VOTING: Track which sites voted yes (memory votes)
-  rusty::Mutex<rusty::BTreeSet<siteid_t>> spec_voters_{
-      rusty::BTreeSet<siteid_t>::new_()};
-
- public:
-  using QuorumEventWrapper::QuorumEventWrapper;
-  // @safe
-  bool HasAcceptedValue() {
-    return false;
-  }
-
-  // @safe - Extended to track voter site IDs for speculative voting
-  void FeedResponse(bool y, ballot_t term, siteid_t voter_id = 0) {
-    if (y) {
-      // @unsafe
-      { vote_yes(); }  // 1 unsafe line: calls @unsafe parent method
-      // Track the voter for speculative voting
-      if (commo_quorum_should_record_vote(y, voter_id)) {
-        auto voters = spec_voters_.lock().unwrap();
-        voters->insert(voter_id);
-      }
-    } else {
-      vote_no();
-      if (commo_quorum_should_advance_term(term, q().highest_term_.get()))
-      {
-        q().highest_term_.set(term);
-      }
-    }
-  }
-
-  // Legacy overload for backward compatibility
-  void FeedResponse(bool y, ballot_t term) {
-    FeedResponse(y, term, 0);
-  }
-
-  // @safe
-  int64_t Term() {
-    return q().highest_term_.get();
-  }
-
-  // @unsafe - Get the set of sites that voted yes (memory votes)
-  std::set<siteid_t> GetSpecVoters() {
-    auto voters = spec_voters_.lock().unwrap();
-    std::set<siteid_t> result;
-    auto iter = voters->iter();
-    for (auto voter = iter.next(); voter.is_some(); voter = iter.next()) {
-      result.insert(voter.unwrap());
-    }
-    return result;
-  }
-};
-
-struct SendAppendEntriesResults;
-
-inline SendAppendEntriesResults send_append_entries_results_defaults();
-
-#if RUSTYCPP_RUST
-pub struct SendAppendEntriesResults {
-    done: bool,
-    ok: u64,
-    followerTerm: u64,
-    followerLastLogIndex: u64,
-    followerAckType: u64,
-    empty: bool,
-}
-
-impl SendAppendEntriesResults {
-    fn defaults() -> SendAppendEntriesResults {
-        send_append_entries_results_defaults()
-    }
-
-    // @safe
-    fn apply_reply(&mut self,
-                   ok: u64,
-                   follower_term: u64,
-                   follower_last_log_index: u64,
-                   follower_ack_type: u64,
-                   has_cmd: bool) {
-        self.ok = ok;
-        self.followerTerm = follower_term;
-        self.followerLastLogIndex = follower_last_log_index;
-        self.followerAckType = follower_ack_type;
-        self.empty = !has_cmd;
-        self.done = !(ok == 0 && follower_term == 0 && follower_last_log_index == 0);
-    }
-}
-#endif
-/*RUSTYCPP:GEN-BEGIN id=commo.send_append_entries_results version=1 rust_sha256=6b6bca23f8357319e59dea5bf378dd812d77f4c980f9be24836198af6290a9af*/
-struct SendAppendEntriesResults;
-
-struct SendAppendEntriesResults {
-    bool done;
-    uint64_t ok;
-    uint64_t followerTerm;
-    uint64_t followerLastLogIndex;
-    uint64_t followerAckType;
-    bool empty;
-
-    static SendAppendEntriesResults defaults();
-    void apply_reply(uint64_t ok, uint64_t follower_term, uint64_t follower_last_log_index, uint64_t follower_ack_type, bool has_cmd);
-};
-
-
-inline SendAppendEntriesResults SendAppendEntriesResults::defaults() {
-    return send_append_entries_results_defaults();
-}
-
-inline void SendAppendEntriesResults::apply_reply(uint64_t ok, uint64_t follower_term, uint64_t follower_last_log_index, uint64_t follower_ack_type, bool has_cmd) {
-    this->ok = std::move(ok);
-    this->followerTerm = std::move(follower_term);
-    this->followerLastLogIndex = std::move(follower_last_log_index);
-    this->followerAckType = std::move(follower_ack_type);
-    this->empty = !has_cmd;
-    this->done = !(((rusty::detail::deref_if_pointer_like(ok) == static_cast<uint64_t>(0)) && (rusty::detail::deref_if_pointer_like(follower_term) == static_cast<uint64_t>(0))) && (rusty::detail::deref_if_pointer_like(follower_last_log_index) == static_cast<uint64_t>(0)));
-}
-/*RUSTYCPP:GEN-END id=commo.send_append_entries_results*/
-
-inline SendAppendEntriesResults send_append_entries_results_defaults() {
-  SendAppendEntriesResults results{};
-  results.done = false;
-  results.ok = 0;
-  results.followerTerm = 0;
-  results.followerLastLogIndex = 0;
-  results.followerAckType = 0;
-  results.empty = true;
-  return results;
-}
 
 // @safe - value-only interpretation of an AppendEntries callback result. The
 // async callback lifetime, shared result object, and RPC fanout stay in
@@ -434,76 +279,6 @@ inline bool commo_ack_type_is_durable(uint64_t ack_type) {
 }
 /*RUSTYCPP:GEN-END id=commo.ack_type_helpers*/
 
-// Response data for async AppendEntries RPC.
-// Uses shared_ptr semantics to ensure memory validity when callback fires.
-struct AppendEntriesResponse;
-
-inline AppendEntriesResponse append_entries_response_defaults();
-
-#if RUSTYCPP_RUST
-pub struct AppendEntriesResponse {
-    event: shared_ptr<IntEvent>,
-    status: u64,
-    term: u64,
-    last_log_index: u64,
-    ack_type: u64,
-}
-
-impl AppendEntriesResponse {
-    fn defaults() -> AppendEntriesResponse {
-        append_entries_response_defaults()
-    }
-
-    // @safe
-    fn apply_reply(&mut self,
-                   status: u64,
-                   term: u64,
-                   last_log_index: u64,
-                   ack_type: u64) {
-        self.status = status;
-        self.term = term;
-        self.last_log_index = last_log_index;
-        self.ack_type = ack_type;
-    }
-}
-#endif
-/*RUSTYCPP:GEN-BEGIN id=commo.append_entries_response version=1 rust_sha256=de4dfbb8b0268305ca318f5ee94e0258ae18dd8d10205519612e4bf430010684*/
-struct AppendEntriesResponse;
-
-struct AppendEntriesResponse {
-    shared_ptr<IntEvent> event;
-    uint64_t status;
-    uint64_t term;
-    uint64_t last_log_index;
-    uint64_t ack_type;
-
-    static AppendEntriesResponse defaults();
-    void apply_reply(uint64_t status, uint64_t term, uint64_t last_log_index, uint64_t ack_type);
-};
-
-
-inline AppendEntriesResponse AppendEntriesResponse::defaults() {
-    return append_entries_response_defaults();
-}
-
-inline void AppendEntriesResponse::apply_reply(uint64_t status, uint64_t term, uint64_t last_log_index, uint64_t ack_type) {
-    this->status = std::move(status);
-    this->term = std::move(term);
-    this->last_log_index = std::move(last_log_index);
-    this->ack_type = std::move(ack_type);
-}
-/*RUSTYCPP:GEN-END id=commo.append_entries_response*/
-
-inline AppendEntriesResponse append_entries_response_defaults() {
-  AppendEntriesResponse response{};
-  response.event = shared_ptr<IntEvent>();
-  response.status = 0;
-  response.term = 0;
-  response.last_log_index = 0;
-  response.ack_type = 0;
-  return response;
-}
-
 #if RUSTYCPP_RUST
 pub struct RaftCommoIdentityCore {
     self_site_id_: rusty::Cell<u16>,
@@ -649,49 +424,19 @@ friend class RaftProxy;
   // @safe
   RaftCommo(rusty::Option<rusty::Arc<PollThread>> poll = rusty::None);
 
-  // @safe
-  // Returns shared_ptr to response data - callback captures this to ensure memory validity
-  // take janus::Command (was shared_ptr<Marshallable>);
-  // shared_ptr<Marshallable> callers auto-convert via implicit Command ctor.
-  shared_ptr<AppendEntriesResponse>
-  SendAppendEntries2(siteid_t site_id,
-                    parid_t par_id,
-                    slotid_t slot_id,
-                    ballot_t ballot,
-                    bool isLeader,
-                    siteid_t leader_site_id,
-                    uint64_t currentTerm,
-                    uint64_t prevLogIndex,
-                    uint64_t prevLogTerm,
-                    uint64_t commitIndex,
-                    const janus::Command& cmd,
-                    uint64_t cmdLogTerm
-                    );
+  // The base Communicator owns the legacy, untyped proxy table. RaftServer
+  // must not reach into that rrr representation directly; these methods are
+  // the intentionally narrow lifecycle/read boundary it needs.
+  using PartitionProxyTable = map<parid_t, vector<SiteProxyPair>>;
 
-  // @unsafe - C-style cast, raw pointers
-  // take janus::Command (was shared_ptr<Marshallable>);
-  // shared_ptr<Marshallable> callers auto-convert via implicit Command ctor.
-  shared_ptr<SendAppendEntriesResults>
-  SendAppendEntries(siteid_t site_id,
-                    parid_t par_id,
-                    slotid_t slot_id,
-                    ballot_t ballot,
-                    bool isLeader,
-                    siteid_t leader_site_id,
-                    uint64_t currentTerm,
-                    uint64_t prevLogIndex,
-                    uint64_t prevLogTerm,
-                    uint64_t commitIndex,
-                    const janus::Command& cmd,
-                    uint64_t cmdLogTerm,
-                    bool trigger_election_now = false);
-  // @unsafe - C-style cast
-  shared_ptr<RaftVoteQuorumEvent>
-  BroadcastVote(parid_t par_id,
-                        slotid_t lst_log_idx,
-                        ballot_t lst_log_term,
-                        siteid_t self_id,
-                        ballot_t cur_term );
+  // @unsafe - returns copies of legacy raw proxy entries owned by Communicator.
+  vector<SiteProxyPair> PeerProxies(parid_t par_id) const;
+  // @unsafe - transfers the entire legacy proxy table for test Kill/Restart.
+  PartitionProxyTable TakePartitionProxyTable();
+  // @unsafe - restores a table previously returned by TakePartitionProxyTable.
+  void RestorePartitionProxyTable(PartitionProxyTable proxy_table);
+  // @unsafe - global view gossip remains a Communicator-owned legacy concern.
+  void PublishPartitionView(parid_t partition_id, const ViewData& view_data);
 
   /**
    * SendTimeoutNow - Send TimeoutNow RPC to target replica
@@ -822,12 +567,9 @@ friend class RaftProxy;
   // ==========================================================================
   // callback-shaped variants of the quorum RPCs.
   //
-  // The existing SendAppendEntries / BroadcastVote methods return
-  // shared_ptr<QuorumEvent> shapes that fit the fiber-based wait path in
-  // RaftServer. The new *Cb variants deliver each peer's reply via a plain
-  // callback, which is the shape RrrTransportAdapter wires into TransportBase. Both
-  // variants share the same underlying rrr async_* call site; the *Cb
-  // variants are merely a different projection of the reply.
+  // The *Cb variants deliver each peer's reply via a plain callback, which is
+  // the shape RrrTransportAdapter wires into TransportBase. They share the
+  // underlying rrr async_* call sites with the legacy communicator methods.
   // ==========================================================================
 
   // @unsafe - legacy RPC boundary: single-target AppendEntries callback API.
@@ -849,16 +591,18 @@ friend class RaftProxy;
       bool trigger_election_now,
       rusty::Function<void(siteid_t, raft::AppendEntriesReply)> on_reply);
 
-  // @unsafe - legacy RPC fanout boundary: broadcasts to every peer except self.
-  // on_reply is shared across multiple async replies using the implementation's
-  // shared_ptr bridge because rusty::Function is move-only.
-  void BroadcastVoteCb(
+  // @unsafe - legacy RPC boundary: single-target Vote callback API.
+  // on_reply fires once for the target site if a reply arrives; on transport
+  // error, it does not fire, so callers should treat absence as timeout.
+  void SendVoteCb(
+      siteid_t site_id,
       parid_t par_id,
       slotid_t lst_log_idx,
       ballot_t lst_log_term,
       siteid_t self_id,
       ballot_t cur_term,
       rusty::Function<void(siteid_t, raft::VoteReply)> on_reply);
+
 };
 
 } // namespace janus

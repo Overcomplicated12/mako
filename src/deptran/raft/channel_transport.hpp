@@ -15,8 +15,10 @@
  *     then blocks on the reply receiver. The caller's thread parks in
  *     recv() until the remote worker fills the slot.
  *   - ChannelNodeWorker drains envelopes and invokes each envelope's
- *     deliver closure against the local DispatcherProxy. The closure
- *     synchronously calls the matching handle_* and forwards its
+ *     deliver closure against the local DispatcherProxy. Node isolation is
+ *     checked again immediately before dispatch, so a packet queued just
+ *     before Disconnect() cannot cross the new isolation boundary. The
+ *     closure synchronously calls the matching handle_* and forwards its
  *     return value through the reply sender.
  *   - Fire-and-forget methods push an envelope whose deliver closure
  *     calls handle_* and discards the return value.
@@ -27,7 +29,11 @@
  *    can cross mpsc boundaries.
  */
 
+#include <algorithm>
+#include <array>
+#include <atomic>
 #include <cstdint>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -271,7 +277,10 @@ ChannelFaults& ChannelSwitchboardStateCore::faults_mut() {
 class ChannelSwitchboard {
  public:
   // @safe
-  ChannelSwitchboard() : state_core_(ChannelSwitchboardStateCore::new_()) {}
+  ChannelSwitchboard()
+      : isolated_sites_(std::make_shared<std::atomic<uint64_t>>(0)),
+        metrics_(std::make_shared<Metrics>()),
+        state_core_(ChannelSwitchboardStateCore::new_()) {}
 
   // @safe - registers a new site. Returns the receiver side.
   rusty::sync::mpsc::Receiver<Envelope> register_site(siteid_t s) {
@@ -280,9 +289,28 @@ class ChannelSwitchboard {
     return std::move(rx);
   }
 
+  // @safe - removes one endpoint. Dropping its Sender closes the matching
+  // receiver, which lets a blocking ChannelNodeWorker exit before its
+  // dispatcher (and the server it borrows) is destroyed.
+  void unregister_site(siteid_t s) {
+    for (size_t i = 0; i < senders_.size();) {
+      if (senders_[i].first == s) {
+        senders_.remove(i);
+      } else {
+        ++i;
+      }
+    }
+  }
+
   // @unsafe { pushes into mpsc; drops silently if the dest is gone }
   void send(Envelope env) {
-    if (state_core_.is_dropped(env.from, env.to)) return;
+    if (env.from < metrics_->rpc_count.size()) {
+      metrics_->rpc_count[env.from].fetch_add(1, std::memory_order_relaxed);
+    }
+    if (is_isolated(env.from) || is_isolated(env.to) ||
+        state_core_.is_dropped(env.from, env.to)) {
+      return;
+    }
     for (auto& pair : senders_) {
       if (channel_envelope_matches_destination(env.to, pair.first)) {
         (void)pair.second.send(std::move(env));
@@ -295,6 +323,19 @@ class ChannelSwitchboard {
   void drop_direction(siteid_t from, siteid_t to) {
     state_core_.faults_mut().dropped.push({from, to});
   }
+  // @safe - removes exactly one directed fault while preserving unrelated
+  // drops and any active partition fault.
+  void undrop_direction(siteid_t from, siteid_t to) {
+    auto& dropped = state_core_.faults_mut().dropped;
+    for (size_t i = 0; i < dropped.size();) {
+      const auto& fault = dropped[i];
+      if (fault.first == from && fault.second == to) {
+        dropped.remove(i);
+      } else {
+        ++i;
+      }
+    }
+  }
   void partition(std::vector<std::vector<siteid_t>> groups) {
     auto partitions = rusty::Vec<rusty::Vec<siteid_t>>::new_();
     for (auto& group : groups) {
@@ -306,10 +347,56 @@ class ChannelSwitchboard {
   }
   void reset_faults() {
     state_core_.reset_faults();
+    isolated_sites_->store(0, std::memory_order_release);
   }
 
+  // @safe - returns attempted outbound RPCs from one test site. Counting at
+  // the transport boundary matches the production RaftCommo metric, including
+  // requests intentionally dropped by a configured fault.
+  uint64_t rpc_count(siteid_t site) const {
+    return site < metrics_->rpc_count.size()
+               ? metrics_->rpc_count[site].load(std::memory_order_relaxed)
+               : 0;
+  }
+
+  // @safe - node-scoped isolation composes with directed drops. Unlike
+  // repeatedly adding/removing directed pairs, reconnecting one node cannot
+  // accidentally restore traffic still blocked by another disconnected node.
+  void isolate_site(siteid_t site) {
+    if (site < 64) {
+      isolated_sites_->fetch_or(uint64_t{1} << site,
+                                std::memory_order_release);
+    }
+  }
+  void unisolate_site(siteid_t site) {
+    if (site < 64) {
+      isolated_sites_->fetch_and(~(uint64_t{1} << site),
+                                 std::memory_order_release);
+    }
+  }
+
+  // @safe - node isolation is atomic so workers may re-check it while a
+  // test thread changes connectivity. Directed drops and partitions are
+  // evaluated when an envelope is queued; this method fences in-flight RPCs
+  // when a whole site is disconnected.
+  bool dispatch_is_blocked(const Envelope& env) const {
+    return is_isolated(env.from) || is_isolated(env.to);
+ }
+
  private:
+  struct Metrics {
+    std::array<std::atomic<uint64_t>, 64> rpc_count{};
+  };
+
+  bool is_isolated(siteid_t site) const {
+    return site < 64 &&
+           (isolated_sites_->load(std::memory_order_acquire) &
+            (uint64_t{1} << site)) != 0;
+  }
+
   rusty::Vec<std::pair<siteid_t, rusty::sync::mpsc::Sender<Envelope>>> senders_;
+  std::shared_ptr<std::atomic<uint64_t>> isolated_sites_;
+  std::shared_ptr<Metrics> metrics_;
   ChannelSwitchboardStateCore state_core_;
 };
 
@@ -744,14 +831,19 @@ class ChannelNodeWorker {
  public:
   // @safe
   ChannelNodeWorker(rusty::sync::mpsc::Receiver<Envelope> rx,
-                    DispatcherProxy dispatcher)
-      : rx_(std::move(rx)), dispatcher_(std::move(dispatcher)) {}
+                    DispatcherProxy dispatcher,
+                    const ChannelSwitchboard* switchboard = nullptr)
+      : rx_(std::move(rx)), dispatcher_(std::move(dispatcher)),
+        switchboard_(switchboard) {}
 
   // @unsafe { try_recv / Result unwrap on rusty boundary }
   bool step() {
     auto r = rx_.try_recv();
     if (r.is_err()) return false;
     auto env = r.unwrap();
+    if (switchboard_ != nullptr && switchboard_->dispatch_is_blocked(env)) {
+      return true;
+    }
     env.deliver(dispatcher_);
     return true;
   }
@@ -761,6 +853,9 @@ class ChannelNodeWorker {
     auto r = rx_.recv();
     if (r.is_err()) return false;
     auto env = r.unwrap();
+    if (switchboard_ != nullptr && switchboard_->dispatch_is_blocked(env)) {
+      return true;
+    }
     env.deliver(dispatcher_);
     return true;
   }
@@ -775,6 +870,7 @@ class ChannelNodeWorker {
  private:
   rusty::sync::mpsc::Receiver<Envelope> rx_;
   DispatcherProxy                       dispatcher_;
+  const ChannelSwitchboard*             switchboard_;
 };
 
 }  // namespace raft

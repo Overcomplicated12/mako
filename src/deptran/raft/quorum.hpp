@@ -4,7 +4,7 @@
  * @file quorum.hpp
  * @brief `RaftQuorum<Reply>` — N-replies-with-timeout aggregator used by
  *        phase-8.1+ raft outbound paths in place of the legacy
- *        `RaftVoteQuorumEvent` / `SendAppendEntriesResults` machinery.
+ *        legacy callback/result aggregation machinery.
  *
  * Threading model:
  *  - `on_reply` is called from sub-fibers that completed their per-peer
@@ -127,7 +127,7 @@ class RaftQuorum {
   RaftQuorum& operator=(RaftQuorum&&) = delete;
 
   // @safe - record one peer's reply, possibly waking the orchestrator.
-  void on_reply(siteid_t from, Reply reply) {
+  void on_reply(siteid_t from, Reply reply) const {
     {
       auto guard = replies_.lock().unwrap();
       guard->push({from, std::move(reply)});
@@ -145,7 +145,7 @@ class RaftQuorum {
 
   // @safe - block the calling fiber up to timeout_us; returns whether the
   // quorum threshold was reached.
-  bool wait_until_quorum(uint64_t timeout_us) {
+  bool wait_until_quorum(uint64_t timeout_us) const {
     // @unsafe { rrr::IntEvent::wait yields the fiber via the reactor;
     //           rrr-boundary call }
     ready_->wait_timeout(timeout_us);
@@ -154,7 +154,7 @@ class RaftQuorum {
   }
 
   // @safe - drain the accumulated (siteid, reply) pairs.
-  rusty::Vec<std::pair<siteid_t, Reply>> collect() {
+  rusty::Vec<std::pair<siteid_t, Reply>> collect() const {
     auto guard = replies_.lock().unwrap();
     auto replies = std::move(*guard);
     *guard = rusty::Vec<std::pair<siteid_t, Reply>>::new_();
@@ -176,7 +176,7 @@ class RaftQuorum {
   const int n_needed_;
   // See class-level @unsafe note about std::shared_ptr.
   std::shared_ptr<::rrr::IntEvent> ready_;
-  rusty::sync::atomic::AtomicI32 n_received_{0};
+  mutable rusty::sync::atomic::AtomicI32 n_received_{0};
   mutable rusty::Mutex<rusty::Vec<std::pair<siteid_t, Reply>>> replies_;
 };
 

@@ -9,6 +9,7 @@
 #include <rusty/cell.hpp>
 #include <rusty/option.hpp>
 #include <rusty/mutex.hpp>
+#include <mutex>
 
 namespace janus {
 
@@ -22,7 +23,7 @@ class RaftFrame : public Frame {
 #ifdef RAFT_TEST_CORO
   // @unsafe - test-only global coordination state; keep hand-written while the
   // lab coroutine harness exists.
-  static rusty::Mutex raft_test_mutex_;
+  static std::mutex raft_test_mutex_;
   // raft_test_fiber_ demoted to a file-scope static in frame.cc because
   // rusty::Rc is now module-only (no header). All references live in
   // frame.cc; nothing outside this TU consumes the field.
@@ -48,6 +49,16 @@ class RaftFrame : public Frame {
   // @unsafe - owning scheduler/server handle. Exposed as a raw borrowed
   // TxLogServer* by CreateScheduler(); callers must not delete it.
   rusty::Option<rusty::Box<RaftServer>> svr_{rusty::None};
+  // Borrowed access for legacy lab code. RaftFrame retains ownership in the
+  // Rusty options above; callers must not retain either pointer past the frame.
+  RaftServer* server() {
+    verify(svr_.is_some());
+    return svr_.as_mut().unwrap().get();
+  }
+  RaftCommo* commo() {
+    verify(commo_.is_some());
+    return commo_.as_mut().unwrap().get();
+  }
   Executor *CreateExecutor(cmdid_t cmd_id, TxLogServer *sched) override;
   Coordinator *CreateCoordinator(cooid_t coo_id,
                                  Config *config,

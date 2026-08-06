@@ -2,31 +2,14 @@
 
 /**
  * @file raft_node.hpp
- * @brief Phase 6 of the decouple plan — single-node facade that owns a
- *        transport, storage, and snapshot-manager and exposes a
- *        DispatcherProxy to the cluster. Intentionally a SKELETON: it
- *        holds the wiring but does not yet drive the full RaftServer
- *        state machine, because RaftServer is still coupled to
- *        rrr::PollThread / rrr::Fiber. That integration is the
- *        remaining Phase 6.5 (deferred in the same spirit as Phase 2.5).
- *
- * What this file provides right now:
- *   - RaftNode type holding:
- *       siteid_t id, TransportProxy, LogStorage&, SnapshotManager&,
- *       a simple DispatcherProxy produced by the node itself.
- *   - Inspection accessors (is_leader, current_term, commit_index) —
- *     placeholder implementations backed by in-node fields so tests
- *     can exercise the cluster plumbing end-to-end.
- *   - A `DummyDispatcher` inner type that satisfies DispatcherBase
- *     by accepting every RPC and firing a vacuous reply. Phase 6.5
- *     replaces it with a real RaftServer-backed dispatcher.
- *
- * The point of keeping this skeleton now is to let Phase 7 wire up
- * raft_lab_standalone without a circular dependency on the RaftServer
- * refactor.
+ * @brief In-process Raft node facade. Each TestCluster node owns a real
+ *        RaftServer and transfers the server-backed DispatcherProxy exactly
+ *        once to its ChannelNodeWorker. The small injection-only constructor
+ *        remains for ownership-boundary unit tests.
  */
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include <rusty/box.hpp>
@@ -36,6 +19,7 @@
 #include "dispatcher.hpp"
 #include "log_storage.hpp"
 #include "messages.hpp"
+#include "raft_server_dispatcher.hpp"
 #include "snapshot_manager.hpp"
 #include "transport.hpp"
 
@@ -234,9 +218,6 @@ class DummyDispatcher : public DispatcherBase {
 #if RUSTYCPP_RUST
 pub struct RaftNodeStateCore {
     id_: u16,
-    is_leader_: rusty::Cell<bool>,
-    commit_index_: rusty::Cell<u64>,
-    current_term_: rusty::Cell<u64>,
 }
 
 impl RaftNodeStateCore {
@@ -244,9 +225,6 @@ impl RaftNodeStateCore {
     fn new(id: u16) -> RaftNodeStateCore {
         RaftNodeStateCore {
             id_: id,
-            is_leader_: rusty::Cell::<bool>::new_(false),
-            commit_index_: rusty::Cell::<u64>::new_(0),
-            current_term_: rusty::Cell::<u64>::new_(0),
         }
     }
 
@@ -255,87 +233,25 @@ impl RaftNodeStateCore {
         self.id_
     }
 
-    // @safe
-    fn is_leader(&self) -> bool {
-        self.is_leader_.get()
-    }
-
-    // @safe
-    fn set_is_leader(&mut self, value: bool) {
-        self.is_leader_.set(value)
-    }
-
-    // @safe
-    fn commit_index(&self) -> u64 {
-        self.commit_index_.get()
-    }
-
-    // @safe
-    fn set_commit_index(&mut self, value: u64) {
-        self.commit_index_.set(value)
-    }
-
-    // @safe
-    fn current_term(&self) -> u64 {
-        self.current_term_.get()
-    }
-
-    // @safe
-    fn set_current_term(&mut self, value: u64) {
-        self.current_term_.set(value)
-    }
 }
 #endif
-/*RUSTYCPP:GEN-BEGIN id=raft_node.2 version=1 rust_sha256=a17dd16282342a82fc08decde755f495313988dc342d12136327ed2826fdad07*/
+/*RUSTYCPP:GEN-BEGIN id=raft_node.2 version=1 rust_sha256=61862082a5bf70ffccff3aa9b531565d7d1e6504e8a24002709e2b436172b9b0*/
 struct RaftNodeStateCore;
 
 struct RaftNodeStateCore {
     uint16_t id_;
-    rusty::Cell<bool> is_leader_;
-    rusty::Cell<uint64_t> commit_index_;
-    rusty::Cell<uint64_t> current_term_;
 
     static RaftNodeStateCore new_(uint16_t id);
     uint16_t id() const;
-    bool is_leader() const;
-    void set_is_leader(bool value);
-    uint64_t commit_index() const;
-    void set_commit_index(uint64_t value);
-    uint64_t current_term() const;
-    void set_current_term(uint64_t value);
 };
 
 
 inline RaftNodeStateCore RaftNodeStateCore::new_(uint16_t id) {
-    return RaftNodeStateCore{.id_ = std::move(id), .is_leader_ = rusty::Cell<bool>::new_(false), .commit_index_ = rusty::Cell<uint64_t>::new_(static_cast<uint64_t>(0)), .current_term_ = rusty::Cell<uint64_t>::new_(static_cast<uint64_t>(0))};
+    return RaftNodeStateCore{.id_ = std::move(id)};
 }
 
 inline uint16_t RaftNodeStateCore::id() const {
     return this->id_;
-}
-
-inline bool RaftNodeStateCore::is_leader() const {
-    return this->is_leader_.get();
-}
-
-inline void RaftNodeStateCore::set_is_leader(bool value) {
-    this->is_leader_.set(std::move(value));
-}
-
-inline uint64_t RaftNodeStateCore::commit_index() const {
-    return this->commit_index_.get();
-}
-
-inline void RaftNodeStateCore::set_commit_index(uint64_t value) {
-    this->commit_index_.set(std::move(value));
-}
-
-inline uint64_t RaftNodeStateCore::current_term() const {
-    return this->current_term_.get();
-}
-
-inline void RaftNodeStateCore::set_current_term(uint64_t value) {
-    this->current_term_.set(std::move(value));
 }
 /*RUSTYCPP:GEN-END id=raft_node.2*/
 // ---------------------------------------------------------------------------
@@ -344,46 +260,89 @@ inline void RaftNodeStateCore::set_current_term(uint64_t value) {
 
 class RaftNode {
  public:
-  // @unsafe { log_storage and snap_manager are non-owning references;
-  //           their lifetimes are managed by TestCluster (phase 6) or
-  //           by the production wiring (later). }
+  // @unsafe { `dispatcher` may borrow a RaftServer. The owner of that server
+  // must outlive the ChannelNodeWorker which takes this dispatcher. This
+  // constructor is only the explicit dispatcher-ownership test seam. }
   RaftNode(siteid_t id,
            TransportProxy transport,
            LogStorage* log_storage,
-           SnapshotManager* snap_manager)
+           SnapshotManager* snap_manager,
+           DispatcherProxy dispatcher)
       : state_core_(RaftNodeStateCore::new_(id)),
         transport_(rusty::move(transport)),
         log_storage_(log_storage),
         snap_manager_(snap_manager),
-        dispatcher_(rusty::make_box<DummyDispatcher>(id)) {}
+        dispatcher_(rusty::move(dispatcher)) {}
+
+  // @unsafe { server ownership is retained by the node while its dispatcher
+  // is owned by the worker. TestCluster destroys workers before nodes. }
+  RaftNode(siteid_t id,
+           TransportProxy transport,
+           LogStorage* log_storage,
+           SnapshotManager* snap_manager,
+           std::unique_ptr<RaftServer> server)
+      : state_core_(RaftNodeStateCore::new_(id)),
+        transport_(rusty::move(transport)),
+        log_storage_(log_storage),
+        snap_manager_(snap_manager),
+        dispatcher_(make_raft_server_dispatcher(server.get())),
+        server_(rusty::move(server)) {}
 
   // @safe
   siteid_t id() const { return state_core_.id(); }
 
-  // DispatcherProxy is move-only; callers that want to hold onto the
-  // dispatcher should take it once and stash it (e.g. in
-  // ChannelNodeWorker). Phase 6.5 replaces DummyDispatcher with a
-  // real impl.
-  // @safe
+  // DispatcherProxy is move-only. The node transfers it exactly once to its
+  // ChannelNodeWorker; keeping that ownership boundary explicit means a real
+  // RaftServer-backed dispatcher has the same lifetime model as the dummy.
+  // @unsafe { caller must take the dispatcher only once. }
   DispatcherProxy take_dispatcher() {
-    // Build a fresh DummyDispatcher so the node can still keep its own
-    // view after handing one out. DummyDispatcher is stateless beyond
-    // self_, so a fresh instance is semantically equivalent.
-    return rusty::make_box<DummyDispatcher>(state_core_.id());
+    return rusty::move(dispatcher_);
   }
 
-  // Inspection accessors. These are placeholders backed by simple
-  // in-node fields so test-cluster plumbing can be exercised; they
-  // will be replaced by delegation to a real RaftServer in Phase 6.5.
-  // @safe
-  bool      is_leader()      const { return state_core_.is_leader(); }
-  slotid_t  commit_index()   const { return state_core_.commit_index(); }
-  ballot_t  current_term()   const { return state_core_.current_term(); }
+  // @safe - real cluster nodes delegate inspection to their owned server.
+  bool is_leader() const {
+    return server_ != nullptr && server_->IsLeader();
+  }
+  slotid_t commit_index() const {
+    return server_ != nullptr ? server_->commitIndex : 0;
+  }
+  ballot_t current_term() const {
+    return server_ != nullptr ? server_->currentTerm : 0;
+  }
 
-  // @safe - manual state injection used by the Phase 6 tests
-  void force_leader(bool b)             { state_core_.set_is_leader(b); }
-  void set_commit_index(slotid_t s)     { state_core_.set_commit_index(s); }
-  void set_current_term(ballot_t t)     { state_core_.set_current_term(t); }
+  // @safe - borrowed server pointer, null only for the legacy dummy node.
+  RaftServer* server() { return server_.get(); }
+
+  // @safe - test hooks for real cluster nodes.
+  void force_leader(bool b) {
+    if (server_) {
+      server_->setIsLeader(b);
+    }
+  }
+  void set_commit_index(slotid_t s) {
+    if (server_) {
+      server_->commitIndex = s;
+    }
+  }
+  void set_current_term(ballot_t t) {
+    if (server_) {
+      server_->currentTerm = t;
+    }
+  }
+
+  // @unsafe - caller must first stop and join the worker that owns the old
+  // dispatcher. The returned server stays alive until that ordering is met.
+  std::unique_ptr<RaftServer> replace_server(std::unique_ptr<RaftServer> server) {
+    verify(server != nullptr);
+    dispatcher_ = make_raft_server_dispatcher(server.get());
+    auto old = rusty::move(server_);
+    server_ = rusty::move(server);
+    return old;
+  }
+
+  // @unsafe - the caller must first stop the worker and join the node's
+  // PollThread. This is the terminal half of the TestCluster kill lifecycle.
+  std::unique_ptr<RaftServer> release_server() { return rusty::move(server_); }
 
   // @safe - borrow the transport for sending RPCs
   TransportProxy& transport() { return transport_; }
@@ -398,6 +357,7 @@ class RaftNode {
   LogStorage*                   log_storage_{nullptr};
   SnapshotManager*              snap_manager_{nullptr};
   DispatcherProxy               dispatcher_;
+  std::unique_ptr<RaftServer>   server_{};
 };
 
 }  // namespace raft

@@ -66,7 +66,7 @@ RaftTestConfig::RaftTestConfig(std::map<siteid_t, RaftFrame*>& replicas) {
   for (auto& pair : replicas) {
     auto svr = pair.first;
     auto frame = pair.second;
-    frame->svr_->rep_frame_ = frame->svr_->frame_;  // Set rep_frame_ directly like lab solution
+    frame->server()->rep_frame_ = frame->server()->frame_;  // Set rep_frame_ directly like lab solution
     RaftTestConfig::committed_cmds[svr].push_back(-1);
     RaftTestConfig::rpc_count_last[svr] = 0;
     disconnected_[svr] = false;
@@ -75,6 +75,12 @@ RaftTestConfig::RaftTestConfig(std::map<siteid_t, RaftFrame*>& replicas) {
 }
 
 void RaftTestConfig::SetLearnerAction(void) {
+  if (cluster_ != nullptr) {
+    // TestCluster verifies agreement from real commit indexes. Its reduced
+    // bootstrap intentionally uses a no-op application callback and does not
+    // borrow a Frame-owned learner action.
+    return;
+  }
   for (auto& pair : replicas) {
     auto svr = pair.first;
     auto frame = pair.second;
@@ -91,7 +97,7 @@ void RaftTestConfig::SetLearnerAction(void) {
           RaftTestConfig::committed_cmds[svr].push_back(commit_cmd.unwrap()->tx_id_);
           return 0;
         };
-    frame->svr_->RegLearnerAction(RaftTestConfig::commit_callbacks[svr]);
+    frame->server()->RegLearnerAction(RaftTestConfig::commit_callbacks[svr]);
   }
 }
 
@@ -105,6 +111,52 @@ bool RaftTestConfig::NoLeader(void) {
 }
 
 int RaftTestConfig::waitOneLeader(bool want_leader, int expected) {
+  if (cluster_ != nullptr) {
+    bool synchronized_leader = false;
+    size_t next_candidate = 0;
+    for (int retry = 0; retry < 20; ++retry) {
+      int leader = -1;
+      uint64_t leader_term = 0;
+      for (auto svr : cluster_->site_ids()) {
+        if (disconnected_[svr]) continue;
+        auto* server = cluster_->node_server(svr);
+        if (server == nullptr || !cluster_->node_is_leader(svr)) continue;
+        const uint64_t term = cluster_->node_current_term(svr);
+        if (leader != -1 && term == leader_term) return -2;
+        if (leader == -1 || term > leader_term) {
+          leader = svr;
+          leader_term = term;
+        }
+      }
+      if (leader != -1) {
+        if (!want_leader) return -1;
+        if (!synchronized_leader) {
+          // A reconnecting former leader has not seen a production heartbeat:
+          // drive the two deterministic rounds that convey the new term and
+          // commit index before declaring the cluster stable.
+          (void)cluster_->step_replication();
+          (void)cluster_->step_replication();
+          synchronized_leader = true;
+          continue;
+        }
+        return expected >= 0 && leader != expected ? -3 : leader;
+      }
+      if (!want_leader) return -1;
+      const auto& sites = cluster_->site_ids();
+      for (size_t candidate = 0; candidate < sites.size(); ++candidate) {
+        const auto svr = sites[next_candidate++ % sites.size()];
+        if (!disconnected_[svr]) {
+          // Production timers naturally let a different peer try after a
+          // stale-log candidate loses votes. Rotate the explicit test step to
+          // retain that Raft behavior without enabling timer fibers.
+          (void)cluster_->step_election(svr);
+          break;
+        }
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return -1;
+  }
   uint64_t mostRecentTerm = 0, term;
   int leader = -1;  // Use int instead of siteid_t to avoid unsigned conversion
   bool isleader;
@@ -117,10 +169,10 @@ int RaftTestConfig::waitOneLeader(bool want_leader, int expected) {
       auto svr = pair.first;
       auto frame = pair.second;
       // ignore disconnected servers
-      if (frame->svr_->IsDisconnected()) {
+      if (frame->server()->IsDisconnected()) {
         continue;
       }
-      frame->svr_->GetState(&isleader, &term);
+      frame->server()->GetState(&isleader, &term);
       if (isleader) {
         if (term == mostRecentTerm) {
           Failed("multiple leaders elected in term %ld", term);
@@ -150,11 +202,20 @@ int RaftTestConfig::waitOneLeader(bool want_leader, int expected) {
 }
 
 bool RaftTestConfig::TermMovedOn(uint64_t term) {
+  if (cluster_ != nullptr) {
+    for (auto svr : cluster_->site_ids()) {
+      if (auto* server = cluster_->node_server(svr);
+          server != nullptr && cluster_->node_current_term(svr) > term) {
+        return true;
+      }
+    }
+    return false;
+  }
   for (auto& pair : replicas) {
     auto frame = pair.second;
     uint64_t curTerm;
     bool isLeader;
-    frame->svr_->GetState(&isLeader, &curTerm);
+    frame->server()->GetState(&isLeader, &curTerm);
     if (curTerm > term) {
       return true;
     }
@@ -163,16 +224,32 @@ bool RaftTestConfig::TermMovedOn(uint64_t term) {
 }
 
 uint64_t RaftTestConfig::OneTerm(void) {
+  if (cluster_ != nullptr) {
+    bool found = false;
+    uint64_t term = 0;
+    for (auto svr : cluster_->site_ids()) {
+      if (auto* server = cluster_->node_server(svr); server != nullptr) {
+        const uint64_t current = cluster_->node_current_term(svr);
+        if (!found) {
+          term = current;
+          found = true;
+        } else if (current != term) {
+          return static_cast<uint64_t>(-1);
+        }
+      }
+    }
+    return found ? term : static_cast<uint64_t>(-1);
+  }
   if (replicas.empty()) return -1;
   
   uint64_t term, curTerm;
   bool isLeader;
   auto first_frame = replicas.begin()->second;
-  first_frame->svr_->GetState(&isLeader, &term);
+  first_frame->server()->GetState(&isLeader, &term);
   
   for (auto it = ++replicas.begin(); it != replicas.end(); ++it) {
     auto frame = it->second;
-    frame->svr_->GetState(&isLeader, &curTerm);
+    frame->server()->GetState(&isLeader, &curTerm);
     if (curTerm != term) {
       return -1;
     }
@@ -181,6 +258,16 @@ uint64_t RaftTestConfig::OneTerm(void) {
 }
 
 int RaftTestConfig::NCommitted(uint64_t index) {
+  if (cluster_ != nullptr) {
+    int committed = 0;
+    for (auto svr : cluster_->site_ids()) {
+      if (auto* server = cluster_->node_server(svr);
+          server != nullptr && cluster_->node_commit_index(svr) >= index) {
+        ++committed;
+      }
+    }
+    return committed;
+  }
   int cmd,n = 0;
   for (auto& pair : replicas) {
     auto svr = pair.first;
@@ -200,6 +287,11 @@ int RaftTestConfig::NCommitted(uint64_t index) {
 }
 
 bool RaftTestConfig::Start(siteid_t svr, int cmd, uint64_t *index, uint64_t *term) {
+  if (cluster_ != nullptr) {
+    const bool started = cluster_->append_command(svr, cmd, index, term);
+    if (started) cluster_submitted_commands_[{*index, *term}] = cmd;
+    return started;
+  }
   auto it = replicas.find(svr);
   if (it == replicas.end())
   {
@@ -220,14 +312,30 @@ bool RaftTestConfig::Start(siteid_t svr, int cmd, uint64_t *index, uint64_t *ter
   }
   // call Start()
   // Log_info("Start: Calling Start() on server {} for command {}", svr, cmd);
-  bool result = it->second->svr_->Start(std::move(cmdptr), index, term);
+  bool result = it->second->server()->Start(std::move(cmdptr), index, term);
   // Log_info("Start: Server {} Start() for command {} returned {}, index={}, term={}",
   //          svr, cmd, result ? "SUCCESS" : "FAILED", *index, *term);
   return result;
 }
 
+void RaftTestConfig::ResetInMemoryClusterForIndependentTestSection() {
+  if (cluster_ == nullptr) return;
+  cluster_->reset_for_independent_test_section();
+  for (auto site : cluster_->site_ids()) {
+    disconnected_[site] = false;
+  }
+  cluster_submitted_commands_.clear();
+  cluster_rpc_count_last_.clear();
+}
+
 bool RaftTestConfig::StartWithCallback(siteid_t svr, int cmd, uint64_t *index, uint64_t *term,
                                        rusty::Function<void(CommitStatus)> callback) {
+  if (cluster_ != nullptr) {
+    // The reduced in-memory server intentionally has no Frame-backed client
+    // notification path. Preserve Start's return contract for the lab subset.
+    (void)callback;
+    return Start(svr, cmd, index, term);
+  }
   // First, call Start to submit the command
   bool result = Start(svr, cmd, index, term);
   if (!result) {
@@ -237,13 +345,35 @@ bool RaftTestConfig::StartWithCallback(siteid_t svr, int cmd, uint64_t *index, u
   // If successful, register the callback for commit notifications
   auto it = replicas.find(svr);
   if (it != replicas.end()) {
-    it->second->svr_->RegisterCommitCallback(*index, std::move(callback));
+    it->second->server()->RegisterCommitCallback(*index, std::move(callback));
   }
 
   return result;
 }
 
 int RaftTestConfig::Wait(uint64_t index, int n, uint64_t term) {
+  if (cluster_ != nullptr) {
+    const auto submitted = cluster_submitted_commands_.find({index, term});
+    if (submitted == cluster_submitted_commands_.end()) return 0;
+
+    for (int attempt = 0; attempt < 100; ++attempt) {
+      int matching_commits = 0;
+      for (auto site : cluster_->site_ids()) {
+        if (cluster_->node_has_committed_command(site, index,
+                                                 submitted->second)) {
+          ++matching_commits;
+        }
+      }
+      if (matching_commits >= n) {
+        return submitted->second;
+      }
+      if (TermMovedOn(term)) return -2;
+      (void)cluster_->step_replication();
+      (void)cluster_->step_replication();
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return -1;
+  }
   int nc = 0, i;
   auto to = 10000; // 10 milliseconds
   for (i = 0; i < 30; i++) {
@@ -273,7 +403,32 @@ int RaftTestConfig::Wait(uint64_t index, int n, uint64_t term) {
   verify(0);
 }
 
+void RaftTestConfig::WaitForProgress(uint64_t usecs) {
+  if (cluster_ != nullptr) {
+    (void)cluster_->step_replication();
+    (void)cluster_->step_replication();
+    const auto bounded_wait = std::min<uint64_t>(usecs, 10000);
+    std::this_thread::sleep_for(std::chrono::microseconds(bounded_wait));
+    return;
+  }
+  Fiber::sleep(usecs);
+}
+
 uint64_t RaftTestConfig::DoAgreement(int cmd, int n, bool retry) {
+  if (cluster_ != nullptr) {
+    const int attempts = retry ? 100 : 1;
+    for (int attempt = 0; attempt < attempts; ++attempt) {
+      const int leader = OneLeader();
+      if (leader < 0) continue;
+      uint64_t index = 0;
+      uint64_t term = 0;
+      if (!Start(static_cast<siteid_t>(leader), cmd, &index, &term)) continue;
+      const int result = Wait(index, n, term);
+      if (result == cmd) return index;
+      if (!retry) return 0;
+    }
+    return 0;
+  }
   Log_info("DoAgreement: Starting agreement for command {}, expecting {} servers, retry={}", cmd, n, retry ? "true" : "false");
   auto start = chrono::steady_clock::now();
   while ((chrono::steady_clock::now() - start) < chrono::seconds{10}) {
@@ -287,7 +442,7 @@ uint64_t RaftTestConfig::DoAgreement(int cmd, int n, bool retry) {
       auto svr = pair.first;
       auto frame = pair.second;
       // skip disconnected servers
-      if (frame->svr_->IsDisconnected()) {
+      if (frame->server()->IsDisconnected()) {
         // Log_info("DoAgreement: Skipping disconnected server {} for command {}", svr, cmd);
         continue;
       }
@@ -317,11 +472,12 @@ uint64_t RaftTestConfig::DoAgreement(int cmd, int n, bool retry) {
           bool isLeader = false;
           uint64_t curTerm = 0;
           auto ldr_it = replicas.find(ldr);
-          if (ldr_it == replicas.end() || ldr_it->second == nullptr || ldr_it->second->svr_ == nullptr) {
+          if (ldr_it == replicas.end() || ldr_it->second == nullptr ||
+              ldr_it->second->svr_.is_none()) {
             Log_info("DoAgreement: Leader {} disappeared while waiting for command {} at index {}, retrying Start()", ldr, cmd, index);
             break;
           }
-          ldr_it->second->svr_->GetState(&isLeader, &curTerm);
+          ldr_it->second->server()->GetState(&isLeader, &curTerm);
           if (!isLeader || curTerm != term) {
             Log_info("DoAgreement: Leader changed (server={} isLeader={} term={} expected_term={}) while waiting for command {} at index {}, retrying Start()",
                      ldr, isLeader ? 1 : 0, curTerm, term, cmd, index);
@@ -385,6 +541,11 @@ uint64_t RaftTestConfig::DoAgreement(int cmd, int n, bool retry) {
 void RaftTestConfig::Disconnect(siteid_t svr) {
   std::lock_guard<std::mutex> lk(disconnect_mtx_);
   verify(!disconnected_[svr]);
+  if (cluster_ != nullptr) {
+    cluster_->disconnect(svr);
+    disconnected_[svr] = true;
+    return;
+  }
   disconnect(svr);
   disconnected_[svr] = true;
 }
@@ -392,8 +553,19 @@ void RaftTestConfig::Disconnect(siteid_t svr) {
 void RaftTestConfig::Reconnect(siteid_t svr) {
   std::lock_guard<std::mutex> lk(disconnect_mtx_);
   verify(disconnected_[svr]);
+  if (cluster_ != nullptr) {
+    cluster_->reconnect(svr);
+    disconnected_[svr] = false;
+    return;
+  }
   reconnect(svr);
   disconnected_[svr] = false;
+}
+
+void RaftTestConfig::Partition(std::vector<siteid_t> a,
+                               std::vector<siteid_t> b) {
+  verify(cluster_ != nullptr);
+  cluster_->partition(std::move(a), std::move(b));
 }
 
 int RaftTestConfig::NDisconnected(void) {
@@ -406,6 +578,12 @@ int RaftTestConfig::NDisconnected(void) {
 }
 
 void RaftTestConfig::SetUnreliable(bool unreliable) {
+  if (cluster_ != nullptr) {
+    // TestCluster currently models deterministic directed faults only; retain
+    // this state so common lab setup/teardown code stays well-defined.
+    unreliable_ = unreliable;
+    return;
+  }
   std::unique_lock<std::mutex> lk(cv_m_);
   verify(!finished_);
   if (unreliable) {
@@ -431,6 +609,12 @@ bool RaftTestConfig::IsUnreliable(void) {
 }
 
 void RaftTestConfig::Shutdown(void) {
+  if (cluster_ != nullptr) {
+    cluster_->reset_faults();
+    for (auto& pair : disconnected_) pair.second = false;
+    unreliable_ = false;
+    return;
+  }
   // trigger netctlLoop shutdown
   {
     std::unique_lock<std::mutex> lk(cv_m_);
@@ -452,9 +636,15 @@ void RaftTestConfig::Shutdown(void) {
 }
 
 uint64_t RaftTestConfig::RpcCount(siteid_t svr, bool reset) {
+  if (cluster_ != nullptr) {
+    const uint64_t count = cluster_->node_rpc_count(svr);
+    const uint64_t count_last = cluster_rpc_count_last_[svr];
+    if (reset) cluster_rpc_count_last_[svr] = count;
+    return count - count_last;
+  }
   std::lock_guard<std::recursive_mutex> lk(
-    RaftTestConfig::replicas[svr]->commo_->rpc_mtx_);
-  uint64_t count = RaftTestConfig::replicas[svr]->commo_->rpc_count_;
+    RaftTestConfig::replicas[svr]->commo()->rpc_mtx_);
+  uint64_t count = RaftTestConfig::replicas[svr]->commo()->rpc_count_;
   uint64_t count_last = RaftTestConfig::rpc_count_last[svr];
   if (reset) {
     RaftTestConfig::rpc_count_last[svr] = count;
@@ -464,14 +654,24 @@ uint64_t RaftTestConfig::RpcCount(siteid_t svr, bool reset) {
 }
 
 uint64_t RaftTestConfig::RpcTotal(void) {
+  if (cluster_ != nullptr) {
+    uint64_t total = 0;
+    for (auto site : cluster_->site_ids()) {
+      total += cluster_->node_rpc_count(site);
+    }
+    return total;
+  }
   uint64_t total = 0;
   for (auto& pair : replicas) {
-    total += RaftTestConfig::replicas[pair.first]->commo_->rpc_count_;
+    total += RaftTestConfig::replicas[pair.first]->commo()->rpc_count_;
   }
   return total;
 }
 
 bool RaftTestConfig::ServerCommitted(siteid_t svr, uint64_t index, int cmd) {
+  if (cluster_ != nullptr) {
+    return cluster_->node_has_committed_command(svr, index, cmd);
+  }
   if (committed_cmds[svr].size() <= index)
     return false;
   return committed_cmds[svr][index] == cmd;
@@ -549,25 +749,27 @@ void RaftTestConfig::netctlLoop(void) {
 bool RaftTestConfig::isDisconnected(siteid_t svr) {
   std::lock_guard<std::recursive_mutex> lk(connection_m_);
   auto it = RaftTestConfig::replicas.find(svr);
-  if (it == RaftTestConfig::replicas.end() || it->second == nullptr || !it->second->svr_) {
+  if (it == RaftTestConfig::replicas.end() || it->second == nullptr ||
+      it->second->svr_.is_none()) {
     // Missing replica is effectively disconnected for test-control purposes.
     return true;
   }
-  return it->second->svr_->IsDisconnected();
+  return it->second->server()->IsDisconnected();
 }
 
 void RaftTestConfig::disconnect(siteid_t svr, bool ignore) {
   std::lock_guard<std::recursive_mutex> lk(connection_m_);
   auto it = RaftTestConfig::replicas.find(svr);
-  if (it == RaftTestConfig::replicas.end() || it->second == nullptr || !it->second->svr_) {
+  if (it == RaftTestConfig::replicas.end() || it->second == nullptr ||
+      it->second->svr_.is_none()) {
     if (!ignore) {
       Log_warn("[RAFT-TEST] disconnect({}): replica not present", svr);
     }
     return;
   }
-  if (!it->second->svr_->IsDisconnected()) {
+  if (!it->second->server()->IsDisconnected()) {
     // simulate disconnected server
-    it->second->svr_->Disconnect();
+    it->second->server()->Disconnect();
   } else if (!ignore) {
     verify(0);
   }
@@ -576,15 +778,16 @@ void RaftTestConfig::disconnect(siteid_t svr, bool ignore) {
 void RaftTestConfig::reconnect(siteid_t svr, bool ignore) {
   std::lock_guard<std::recursive_mutex> lk(connection_m_);
   auto it = RaftTestConfig::replicas.find(svr);
-  if (it == RaftTestConfig::replicas.end() || it->second == nullptr || !it->second->svr_) {
+  if (it == RaftTestConfig::replicas.end() || it->second == nullptr ||
+      it->second->svr_.is_none()) {
     if (!ignore) {
       Log_warn("[RAFT-TEST] reconnect({}): replica not present", svr);
     }
     return;
   }
-  if (it->second->svr_->IsDisconnected()) {
+  if (it->second->server()->IsDisconnected()) {
     // simulate reconnected server
-    it->second->svr_->Reconnect();
+    it->second->server()->Reconnect();
   } else if (!ignore) {
     verify(0);
   }
@@ -597,10 +800,22 @@ void RaftTestConfig::slow(siteid_t svr, uint32_t msec) {
 }
 
 RaftServer *RaftTestConfig::GetServer(siteid_t svr) {
-  return RaftTestConfig::replicas[svr]->svr_.get();
+  if (cluster_ != nullptr) {
+    for (auto id : cluster_->site_ids()) {
+      if (id == svr) return cluster_->node_server(svr);
+    }
+    return nullptr;
+  }
+  return RaftTestConfig::replicas[svr]->server();
 }
 
 void RaftTestConfig::Kill(siteid_t svr) {
+  if (cluster_ != nullptr) {
+    std::lock_guard<std::mutex> lk(disconnect_mtx_);
+    cluster_->kill(svr);
+    disconnected_[svr] = true;
+    return;
+  }
   std::lock_guard<std::recursive_mutex> lk(connection_m_);
   std::lock_guard<std::mutex> lk2(disconnect_mtx_);
 
@@ -621,8 +836,8 @@ void RaftTestConfig::Kill(siteid_t svr) {
 
   // Disconnect to save RPC proxies before deletion
   RaftFrame* frame = it->second;
-  if (frame && frame->svr_) {
-    frame->svr_->Disconnect(true);
+  if (frame && frame->svr_.is_some()) {
+    frame->server()->Disconnect(true);
   }
 
   // Sleep to allow pending coroutines to complete
@@ -649,6 +864,12 @@ void RaftTestConfig::Kill(siteid_t svr) {
 }
 
 void RaftTestConfig::Restart(siteid_t svr) {
+  if (cluster_ != nullptr) {
+    std::lock_guard<std::mutex> lk(disconnect_mtx_);
+    cluster_->restart(svr);
+    disconnected_[svr] = false;
+    return;
+  }
   std::lock_guard<std::recursive_mutex> lk(connection_m_);
   std::lock_guard<std::mutex> lk2(disconnect_mtx_);
 
@@ -684,11 +905,12 @@ void RaftTestConfig::Restart(siteid_t svr) {
 
   // RaftFrame owns the recreated RaftServer; external users receive borrowed
   // raw pointers via .get(). Persistence is loaded below before publication.
-  frame->svr_ = std::make_unique<RaftServer>(frame);
-  frame->svr_->site_id_ = svr;
-  frame->svr_->partition_id_ = site_info->partition_id_;
-  frame->svr_->loc_id_ = site_info->locale_id;
-  frame->svr_->rep_frame_ = frame;
+  frame->svr_ = rusty::Option<rusty::Box<RaftServer>>(
+      rusty::Box<RaftServer>::emplace(frame));
+  frame->server()->site_id_ = svr;
+  frame->server()->partition_id_ = site_info->partition_id_;
+  frame->server()->loc_id_ = site_info->locale_id;
+  frame->server()->rep_frame_ = frame;
 
   // Reuse the RPC service poll thread kept by RaftServiceImpl across Kill().
   // This ensures inbound RPCs (via RPC server) and outbound RPCs (via Commo)
@@ -696,17 +918,20 @@ void RaftTestConfig::Restart(siteid_t svr) {
   auto poll_thread = RaftServiceImpl::GetPollThread(svr);
   if (poll_thread.is_some()) {
     // RaftFrame owns the recreated communicator.
-    frame->commo_ = std::make_unique<RaftCommo>(std::move(poll_thread));
+    frame->commo_ = rusty::Option<rusty::Box<RaftCommo>>(
+        rusty::Box<RaftCommo>::emplace(std::move(poll_thread)));
   } else {
     Log_warn("[RAFT-RESTART] site {}: poll thread not found, creating new one", svr);
     // RaftFrame owns the recreated communicator even when a poll thread must
     // be created lazily by RaftCommo.
-    frame->commo_ = std::make_unique<RaftCommo>(rusty::None);
+    frame->commo_ = rusty::Option<rusty::Box<RaftCommo>>(
+        rusty::Box<RaftCommo>::emplace(rusty::None));
   }
-  frame->commo_->loc_id_ = site_info->locale_id;
+  frame->commo()->loc_id_ = site_info->locale_id;
 
   // Set commo_ in server before initializing
-  frame->svr_->commo_ = frame->commo_.get();
+  frame->server()->commo_ = frame->commo();
+  frame->server()->InitializeTransport();
 
   // Manually initialize persistence and load state (without starting coroutines)
   const char* persistence_flag = std::getenv("MAKO_RAFT_PERSISTENCE");
@@ -717,12 +942,12 @@ void RaftTestConfig::Restart(siteid_t svr) {
   if (should_enable) {
     // Set async persistence flag on the server (default: sync)
     const char* async_flag = std::getenv("MAKO_RAFT_ASYNC_PERSISTENCE");
-    frame->svr_->async_persistence_ = (async_flag &&
+    frame->server()->async_persistence_ = (async_flag &&
                                        (strcmp(async_flag, "1") == 0 ||
                                         strcmp(async_flag, "true") == 0));
 
     Log_info("[RAFT-TEST-RESTART] Loading persistence for site {} (mode={})",
-             svr, frame->svr_->async_persistence_ ? "async" : "sync");
+             svr, frame->server()->async_persistence_ ? "async" : "sync");
 
     // Create RecoveryConfig
     raft::RecoveryConfig config = raft::RecoveryConfig::defaults();
@@ -737,18 +962,18 @@ void RaftTestConfig::Restart(siteid_t svr) {
     if (storage) {
       // Use RecoveryManager to orchestrate recovery
       auto result = manager.recover(
-        [frame](std::shared_ptr<janus::raft::LogStorage> s) { frame->svr_->SetLogStorage(s); },
-        [frame]() { return frame->svr_->RecoverFromStorage(); },
+        [frame](std::shared_ptr<janus::raft::LogStorage> s) { frame->server()->SetLogStorage(s); },
+        [frame]() { return frame->server()->RecoverFromStorage(); },
         [frame](raft::RecoveryResult& r) {
-          r.recovered_term = frame->svr_->currentTerm;
-          r.recovered_entries = frame->svr_->raft_logs_.size();
+          r.recovered_term = frame->server()->currentTerm;
+          r.recovered_entries = frame->server()->raft_logs_.size();
         }
       );
 
       if (result.success) {
         Log_info("[RAFT-TEST-RESTART] Loaded: term={} vote={} lastLogIndex={} (mode={})",
-                 frame->svr_->currentTerm, frame->svr_->vote_core_.vote_for(),
-                 frame->svr_->lastLogIndex, static_cast<int>(result.mode));
+                 frame->server()->currentTerm, frame->server()->vote_core_.vote_for(),
+                 frame->server()->lastLogIndex, static_cast<int>(result.mode));
       } else {
         Log_error("[RAFT-TEST-RESTART] Recovery failed: {}", result.error_message.c_str());
       }
@@ -756,33 +981,33 @@ void RaftTestConfig::Restart(siteid_t svr) {
   }
 
   // Record startup timestamp for grace period logic (same as Setup())
-  frame->svr_->leadership_core_.set_startup_timestamp(Time::now(false));
+  frame->server()->leadership_core_.set_startup_timestamp(Time::now(false));
 
   // CRITICAL: Mark Setup() as already done to prevent EnsureSetup() from calling it again
   // This prevents double-initialization of persistence which would reset the loaded state
-  frame->svr_->heartbeat_setup_ = true;
+  frame->server()->heartbeat_setup_ = true;
 
   // Start the heartbeat loop and election timer manually since we're skipping Setup()
   // CRITICAL (Fix 2 part 2): Must add coroutines to the CORRECT poll thread!
   // Using Fiber::create_run would schedule on the current reactor (site 0's test thread),
   // not on this server's poll thread. We must use poll_thread->add() instead.
 #ifdef RAFT_TEST_CORO
-  if (frame->svr_->heartbeat_ && frame->commo_->rpc_poll_.is_some()) {
-    auto& poll_thread = frame->commo_->rpc_poll_.as_ref().unwrap();
+  if (frame->server()->heartbeat_ && frame->commo()->rpc_poll_.is_some()) {
+    auto& poll_thread = frame->commo()->rpc_poll_.as_ref().unwrap();
 
     // Add HeartbeatLoop as a job to the correct poll thread
     auto hb_job = rusty::Arc<OneTimeJob>::new_(OneTimeJob::new_([frame]() {
       Fiber::create_run([frame]() {
-        frame->svr_->HeartbeatLoop();
+        frame->server()->HeartbeatLoop();
       });
     }));
     poll_thread->add(rusty::Arc<Job>(hb_job));
 
     // Add election timer as a job to the correct poll thread
-    if (frame->svr_->failover_) {
+    if (frame->server()->failover_) {
       auto election_job = rusty::Arc<OneTimeJob>::new_(OneTimeJob::new_([frame]() {
         Fiber::create_run([frame]() {
-          frame->svr_->StartElectionTimer();
+          frame->server()->StartElectionTimer();
         });
       }));
       poll_thread->add(rusty::Arc<Job>(election_job));
@@ -803,10 +1028,10 @@ void RaftTestConfig::Restart(siteid_t svr) {
         RaftTestConfig::committed_cmds[svr].push_back(commit_cmd.unwrap()->tx_id_);
         return 0;
       };
-  frame->svr_->RegLearnerAction(commit_callbacks[svr]);
+  frame->server()->RegLearnerAction(commit_callbacks[svr]);
 
   // Rebind the existing RPC service to the newly frame-owned server.
-  RaftServiceImpl::UpdateServer(svr, frame->svr_.get());
+  RaftServiceImpl::UpdateServer(svr, frame->server());
 
   // Publish the restarted frame into the live registry.
   replicas[svr] = frame;
@@ -819,19 +1044,27 @@ void RaftTestConfig::Restart(siteid_t svr) {
 
   // Notify all other servers to reconnect their client connections to this server
   // This is needed because after Kill/Restart, other servers' TCP connections to us are stale
-  if (frame->commo_ != nullptr) {
+  if (frame->commo_.is_some()) {
     Log_info("[RAFT-TEST] Sending NotifyRestart from site {} to all peers", svr);
-    auto commo = dynamic_cast<RaftCommo*>(frame->commo_.get());
+    auto commo = frame->commo();
     if (commo != nullptr) {
-      commo->SendNotifyRestart(svr, frame->svr_->partition_id_);
+      commo->SendNotifyRestart(svr, frame->server()->partition_id_);
     }
   }
 
   Log_info("[RAFT-TEST] Server {} restarted successfully (term={}, lastLogIndex={})",
-           svr, frame->svr_->currentTerm, frame->svr_->lastLogIndex);
+           svr, frame->server()->currentTerm, frame->server()->lastLogIndex);
 }
 
 siteid_t RaftTestConfig::mapServerId(siteid_t server_id) const {
+  if (cluster_ != nullptr) {
+    for (size_t i = 0; i < cluster_->site_ids().size(); ++i) {
+      if (cluster_->site_ids()[i] == server_id) {
+        return static_cast<siteid_t>(i);
+      }
+    }
+    return server_id;
+  }
   // Find the server_id in the replicas map and return its position (0-4)
   int index = 0;
   for (const auto& pair : replicas) {
@@ -845,6 +1078,13 @@ siteid_t RaftTestConfig::mapServerId(siteid_t server_id) const {
 }
 
 siteid_t RaftTestConfig::getServerIdByIndex(int index) const {
+  if (cluster_ != nullptr) {
+    if (!raft_test_index_is_valid(index,
+                                  static_cast<int32_t>(cluster_->size()))) {
+      return static_cast<siteid_t>(-1);
+    }
+    return cluster_->site_ids()[static_cast<size_t>(index)];
+  }
   // Get server ID by its position in the replicas map (0-4)
   if (!raft_test_index_is_valid(index, NSERVERS)) {
     // Index out of range, return -1
@@ -864,6 +1104,17 @@ siteid_t RaftTestConfig::getServerIdByIndex(int index) const {
 }
 
 siteid_t RaftTestConfig::getNextServerId(siteid_t current_server_id, int offset) const {
+  if (cluster_ != nullptr) {
+    const auto& ids = cluster_->site_ids();
+    for (size_t i = 0; i < ids.size(); ++i) {
+      if (ids[i] == current_server_id) {
+        const int next = raft_test_wrapped_index(
+            static_cast<int32_t>(i), offset, static_cast<int32_t>(ids.size()));
+        return ids[static_cast<size_t>(next)];
+      }
+    }
+    return current_server_id;
+  }
   // Find current server's index and add offset, wrapping around
   int current_index = -1;
   int i = 0;
