@@ -5,6 +5,7 @@
 #include "../scheduler.h"
 #include "../classic/tpc_command.h"
 #include "commo.h"
+#include "clock.hpp"
 #include "transport.hpp"
 #include <deque>
 #include <rusty/box.hpp>
@@ -34,7 +35,6 @@ import rusty;
 //   Fiber::sleep: [safe, (int) -> void],
 //   RandomGenerator::rand_double: [safe, (double, double) -> double],
 //   RandomGenerator::rand: [safe, (int, int) -> int],
-//   Time::now: [safe, () -> uint64_t],
 //   std::make_shared: [safe, (...) -> shared_ptr<T>],
 //   dynamic_pointer_cast: [safe, (shared_ptr<T>) -> shared_ptr<U>],
 //   strcmp: [safe, (const char*, const char*) -> int],
@@ -1423,6 +1423,10 @@ struct RaftServerInMemoryTestDependencies {
   locid_t loc_id;
   parid_t partition_id;
   std::vector<siteid_t> peers;
+  // Required test dependency. TestCluster supplies a shared manual clock in
+  // phase 8.8c; accepting the same proxy as production avoids test-mode time
+  // branches in RaftServer.
+  raft::RaftClockProxy clock;
   raft::TransportProxy transport;
   std::shared_ptr<janus::raft::LogStorage> storage;
   std::shared_ptr<janus::raft::SnapshotManager> snapshots;
@@ -1442,6 +1446,16 @@ class RaftServer : public TxLogServer {
   friend class RaftTestConfig;  // Allow test config to access private members for kill/restart
   friend class RaftLabTest;     // Allow test cases to access private members for verification
  private:
+  // A server keeps one monotonic clock for its whole lifetime. Production
+  // construction installs SystemRaftClock; the in-memory harness replaces it
+  // before recording startup time.
+  rusty::Option<raft::RaftClockProxy> clock_{rusty::None};
+
+  raft::RaftClockProxy& clock() {
+    verify(clock_.is_some());
+    return clock_.as_mut().unwrap();
+  }
+
   // ============================================================================
   // LOG PERSISTENCE
   // ============================================================================
@@ -1820,7 +1834,7 @@ class RaftServer : public TxLogServer {
     {
       const char* why = reason ? reason : "unspecified";
       auto prev_time = last_heartbeat_time_;
-      last_heartbeat_time_ = Time::now(false);
+      last_heartbeat_time_ = clock()->now_us();
       // Log only important timer resets (elections, votes), not routine heartbeats
       if (strcmp(why, "granted vote") == 0 || strcmp(why, "start election timer") == 0) {
         Log_info("[TIMER_RESET] Site {}: reset timer ({}) - prev_hb_time={} new_hb_time={} delta={}",
@@ -1921,6 +1935,7 @@ class RaftServer : public TxLogServer {
     site_id_ = deps.site_id;
     loc_id_ = deps.loc_id;
     partition_id_ = deps.partition_id;
+    clock_ = rusty::Some(std::move(deps.clock));
     transport_ = rusty::Some(std::move(deps.transport));
     log_storage_ = janus::raft::make_log_storage_proxy(std::move(deps.storage));
     snapshot_manager_ =
@@ -1937,7 +1952,7 @@ class RaftServer : public TxLogServer {
     background_leadership_services_enabled_ =
         deps.enable_background_leadership_services;
     rule_witness_gc_enabled_ = deps.enable_rule_witness_gc;
-    leadership_core_.set_startup_timestamp(Time::now(false));
+    leadership_core_.set_startup_timestamp(clock()->now_us());
     RegLearnerAction([](int, janus::Command) { return 0; });
     StartApplyThread();
   }

@@ -26,7 +26,6 @@ import std;
 //   Log_error: [safe, (...) -> void]
 //   Log_fatal: [safe, (...) -> void]
 //   verify: [safe, (...) -> void]
-//   Time::now: [safe, () -> uint64_t]
 //   strcmp: [safe, (const char*, const char*) -> int]
 //   std::getenv: [safe, (const char*) -> const char*]
 //   std::tolower: [safe, (int) -> int]
@@ -705,6 +704,7 @@ RaftServer::RaftServer(Frame * frame)
     speculative_core_(RaftServerSpeculativeCore::new_()),
     vote_core_(RaftServerVoteCore::new_(INVALID_SITEID)),
     snapshot_progress_core_(RaftServerSnapshotProgressCore::new_()),
+    clock_(rusty::Some(raft::make_system_raft_clock())),
     timer_(rusty::Box<Timer>::make(Timer()))  // Initialize Box in member initializer list
 {
   frame_ = frame ;
@@ -735,9 +735,9 @@ void RaftServer::OnJetpackPullCmd(const epoch_t& jepoch,
   }
 }
 
-// @unsafe - Election timeout calculation (Time::now and RandomGenerator::rand marked safe via @external)
+// @unsafe - Election timeout calculation (RandomGenerator::rand marked safe via @external)
 uint64_t RaftServer::GetElectionTimeout() {
-  uint64_t current_time = Time::now(false);
+  uint64_t current_time = clock()->now_us();
   const uint64_t grace_period_us = GetPreferredLeaderGracePeriodUs();
   bool in_grace_period = server_election_in_startup_grace_period(
       current_time, leadership_core_.startup_timestamp(), grace_period_us);
@@ -925,12 +925,12 @@ void RaftServer::InitializeTransport() {
   transport_ = rusty::Some(raft::make_rrr_transport(c, site_id_, partition_id_));
 }
 
-// @unsafe - Server setup (Time::now, Log_debug, Fiber::create_run marked safe via @external)
+// @unsafe - Server setup (Log_debug, Fiber::create_run marked safe via @external)
 void RaftServer::Setup() {
   InitializeTransport();
 
   // Record startup time for grace period logic
-  leadership_core_.set_startup_timestamp(Time::now(false));
+  leadership_core_.set_startup_timestamp(clock()->now_us());
 
   // ========== INITIALIZE PERSISTENCE (LogStorage + RecoveryManager) ==========
   const char* persistence_flag = std::getenv("MAKO_RAFT_PERSISTENCE");
@@ -2551,7 +2551,7 @@ void RaftServer::OnAppendEntriesDurable(const ballot_t& term,
 void RaftServer::StartElectionTimer() {
   // @unsafe
   { resetTimer("start election timer"); }
-  last_heartbeat_time_ = Time::now(false);
+  last_heartbeat_time_ = clock()->now_us();
 
   Fiber::create_run([this]() {
     Log_debug("start timer for election") ;
@@ -2573,7 +2573,7 @@ void RaftServer::StartElectionTimer() {
         c->RetryPendingNotifyRestart();
       }
 
-      auto time_now = Time::now(false);
+      auto time_now = clock()->now_us();
       auto time_elapsed = time_now - last_heartbeat_time_;
 
       // Only log when timeout actually fires or when debugging
@@ -3242,7 +3242,7 @@ void RaftServer::StartLeadershipTransferMonitoring() {
     const uint64_t CHECK_INTERVAL_MS = 1000;  // Check every 1 second
     const uint64_t MIN_STABLE_TIME_US = 500000; // Wait 0.5 seconds (in microseconds) after becoming leader before transferring
 
-    uint64_t became_leader_time = Time::now(false);
+    uint64_t became_leader_time = clock()->now_us();
 
     Log_info("[LEADERSHIP-TRANSFER] Site {}: Monitor thread started (will check every {}ms)",
              site_id_, CHECK_INTERVAL_MS);
@@ -3282,7 +3282,7 @@ void RaftServer::StartLeadershipTransferMonitoring() {
         }
 
         // Wait for cluster to stabilize after becoming leader
-        uint64_t time_as_leader = Time::now(false) - became_leader_time;
+        uint64_t time_as_leader = clock()->now_us() - became_leader_time;
         if (!server_leadership_stable_window_elapsed(
                 time_as_leader, MIN_STABLE_TIME_US)) {
           continue;
@@ -3381,7 +3381,7 @@ void RaftServer::InitiateLeadershipTransfer() {
     current_term_snapshot = currentTerm;
 
     // Mark transfer as in progress - this will suppress elections on non-preferred replicas
-    leadership_core_.start_transfer(Time::now(false));
+    leadership_core_.start_transfer(clock()->now_us());
 
     Log_info("[LEADERSHIP-TRANSFER] Site {} (partition {}): Starting transfer to site {}",
              site_id_, partition_id_, target_site_id);

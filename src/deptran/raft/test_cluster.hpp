@@ -358,7 +358,8 @@ class TestCluster : public TestClusterFacade {
     auto server = std::make_unique<RaftServer>(nullptr);
     server->InitializeForInMemoryTest(RaftServerInMemoryTestDependencies{
         site_ids_[i], static_cast<locid_t>(site_ids_[i]), /*partition=*/0,
-        site_ids_, make_channel_transport(&sw_, site_ids_[i], /*par=*/0),
+        site_ids_, make_system_raft_clock(),
+        make_channel_transport(&sw_, site_ids_[i], /*par=*/0),
         logs_[i], snaps_[i]});
     return server;
   }
