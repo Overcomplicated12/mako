@@ -8,8 +8,9 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <utility>
 #include <vector>
+
+#include <rusty/move.hpp>
 
 #include "snapshot_manager.hpp"
 
@@ -22,7 +23,7 @@ class SnapshotManagerProxy {
 
   // @unsafe - retains a legacy polymorphic snapshot backend shared with setup.
   explicit SnapshotManagerProxy(std::shared_ptr<SnapshotManager> backend)
-      : backend_(std::move(backend)) {}
+      : backend_(rusty::move(backend)) {}
 
   explicit operator bool() const noexcept { return backend_ != nullptr; }
 
@@ -82,7 +83,7 @@ class SnapshotManagerProxy {
 // All existing SnapshotManager implementations use this one adapter point.
 inline SnapshotManagerProxy make_snapshot_manager_proxy(
     std::shared_ptr<SnapshotManager> backend) {
-  return SnapshotManagerProxy(std::move(backend));
+  return SnapshotManagerProxy(rusty::move(backend));
 }
 
 }  // namespace raft

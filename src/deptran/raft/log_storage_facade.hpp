@@ -8,8 +8,9 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <utility>
 #include <vector>
+
+#include <rusty/move.hpp>
 
 #include "log_storage.hpp"
 
@@ -22,7 +23,7 @@ class LogStorageProxy {
 
   // @unsafe - retains a legacy polymorphic storage backend shared with setup.
   explicit LogStorageProxy(std::shared_ptr<LogStorage> backend)
-      : backend_(std::move(backend)) {}
+      : backend_(rusty::move(backend)) {}
 
   explicit operator bool() const noexcept { return backend_ != nullptr; }
 
@@ -82,7 +83,7 @@ class LogStorageProxy {
 // All existing LogStorage implementations use this one adapter point.
 inline LogStorageProxy make_log_storage_proxy(
     std::shared_ptr<LogStorage> backend) {
-  return LogStorageProxy(std::move(backend));
+  return LogStorageProxy(rusty::move(backend));
 }
 
 }  // namespace raft

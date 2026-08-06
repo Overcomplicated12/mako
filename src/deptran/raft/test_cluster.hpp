@@ -22,11 +22,11 @@
 #include <functional>
 #include <memory>
 #include <thread>
-#include <utility>
 #include <vector>
 
 #include <rusty/arc.hpp>
 #include <rusty/box.hpp>
+#include <rusty/move.hpp>
 #include <rusty/option.hpp>
 
 #include "channel_transport.hpp"
@@ -126,7 +126,7 @@ class TestCluster : public TestClusterFacade {
   // messages across the boundary. Sites outside both groups remain
   // fully connected (via current switchboard semantics).
   void partition(std::vector<siteid_t> a, std::vector<siteid_t> b) override {
-    sw_.partition({std::move(a), std::move(b)});
+    sw_.partition({rusty::move(a), rusty::move(b)});
   }
 
   // @safe - clear all fault injections.
@@ -192,10 +192,10 @@ class TestCluster : public TestClusterFacade {
     {
       auto& mutable_command = command.get_mut().unwrap();
       mutable_command.tx_id_ = command_id;
-      mutable_command.cmd_ = std::move(pieces);
+      mutable_command.cmd_ = rusty::move(pieces);
     }
     auto envelope = std::make_shared<janus::Command>(
-        janus::Command::pack_aliased<TpcCommitCommand>(std::move(command)));
+        janus::Command::pack_aliased<TpcCommitCommand>(rusty::move(command)));
     struct AppendResult {
       bool started = false;
       uint64_t index = 0;
@@ -269,7 +269,7 @@ class TestCluster : public TestClusterFacade {
     node(s).replace_server(make_server(i));
     start_poll_thread(i);
     workers_[i] = std::make_unique<ChannelNodeWorker>(
-        std::move(receiver), node(s).take_dispatcher(), &sw_);
+        rusty::move(receiver), node(s).take_dispatcher(), &sw_);
     start_worker(i);
     dead_[i] = false;
   }
@@ -322,14 +322,14 @@ class TestCluster : public TestClusterFacade {
 
       TransportProxy tr = make_channel_transport(&sw_, id, /*par=*/0);
       rusty::Box<RaftNode> node(new RaftNode(
-          id, std::move(tr), logs_.back().get(), snaps_.back().get(),
+          id, rusty::move(tr), logs_.back().get(), snaps_.back().get(),
           make_server(i)));
 
       auto worker = std::make_unique<ChannelNodeWorker>(
-          std::move(receivers[i]), node->take_dispatcher(), &sw_);
+          rusty::move(receivers[i]), node->take_dispatcher(), &sw_);
 
-      nodes_.push_back(std::move(node));
-      workers_.push_back(std::move(worker));
+      nodes_.push_back(rusty::move(node));
+      workers_.push_back(rusty::move(worker));
     }
 
     // Start one reactor and one channel drainer per node only after every
@@ -402,7 +402,7 @@ class TestCluster : public TestClusterFacade {
     };
     auto completion = std::make_shared<Completion>();
     auto job = rusty::Arc<rrr::OneTimeJob>::new_(rrr::OneTimeJob::new_(
-        [action = std::move(action), completion]() mutable {
+        [action = rusty::move(action), completion]() mutable {
           action();
           completion->done.store(true, std::memory_order_release);
         }));
