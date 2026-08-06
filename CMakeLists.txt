@@ -2305,6 +2305,13 @@ if(BUILD_TESTS)
     target_link_libraries(test_raft_transport_facade ${GTEST_LIBRARIES} ${GTEST_MAIN_LIBRARIES} pthread rrr)
     add_test(NAME test_raft_transport_facade COMMAND test_raft_transport_facade)
 
+    # Phase 8.8a — injectable production/manual monotonic Raft clocks.
+    add_executable(test_raft_clock tests/raft_clock_test.cc)
+    target_include_directories(test_raft_clock PRIVATE ${TEST_INCLUDE_DIRS} ${GTEST_INCLUDE_DIRS})
+    target_compile_options(test_raft_clock PRIVATE ${TEST_COMPILE_OPTIONS})
+    target_link_libraries(test_raft_clock ${GTEST_LIBRARIES} ${GTEST_MAIN_LIBRARIES} pthread rrr)
+    add_test(NAME test_raft_clock COMMAND test_raft_clock)
+
     add_executable(test_raft_rrr_transport_compile tests/raft_rrr_transport_compile_test.cc)
     target_include_directories(test_raft_rrr_transport_compile PRIVATE
         ${TEST_INCLUDE_DIRS}
