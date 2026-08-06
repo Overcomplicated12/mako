@@ -107,6 +107,20 @@ TEST(RaftTestClusterTest, ElectionConvergesOnExactlyOneLeader) {
   EXPECT_EQ(c->leader_count(), 1u);
 }
 
+TEST(RaftTestClusterTest, ManualClockStepsElectionDeadline) {
+  auto c = TestCluster::with_in_memory_transport(3);
+
+  // Site 1's fixed in-memory timeout is 150 us. The existing predicate is
+  // strict, so 150 does not fire and 151 does.
+  EXPECT_EQ(c->advance_time_by_us(150), 150u);
+  ASSERT_TRUE(c->step_election_timers());
+  EXPECT_EQ(c->leader_count(), 0u);
+
+  EXPECT_EQ(c->advance_time_by_us(1), 151u);
+  ASSERT_TRUE(c->step_election_timers());
+  EXPECT_EQ(c->leader_count(), 1u);
+}
+
 TEST(RaftTestClusterTest, AgreementAdvancesCommitIndexOnEveryNode) {
   auto c = TestCluster::with_in_memory_transport(3);
   ASSERT_TRUE(c->step_election());

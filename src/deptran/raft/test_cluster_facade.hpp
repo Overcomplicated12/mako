@@ -37,6 +37,8 @@ class TestClusterFacade {
   virtual void restart(siteid_t site) = 0;
 
   virtual bool step_election(siteid_t candidate = 0) = 0;
+  virtual uint64_t advance_time_by_us(uint64_t delta_us) = 0;
+  virtual bool step_election_timers() = 0;
   virtual bool step_replication() = 0;
   virtual bool append_command(siteid_t site, int command_id,
                               uint64_t* index, uint64_t* term) = 0;

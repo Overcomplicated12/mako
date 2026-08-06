@@ -1430,6 +1430,9 @@ struct RaftServerInMemoryTestDependencies {
   raft::TransportProxy transport;
   std::shared_ptr<janus::raft::LogStorage> storage;
   std::shared_ptr<janus::raft::SnapshotManager> snapshots;
+  // A fixed timeout makes manual-clock tests deterministic. Production and
+  // in-memory callers that omit it retain the normal timeout policy.
+  rusty::Option<uint64_t> election_timeout_us{rusty::None};
   // The harness drives election/replication explicitly. Production recovery
   // and leadership-transfer services require a Frame/RaftCommo environment.
   bool enable_background_leadership_services = false;
@@ -1450,6 +1453,7 @@ class RaftServer : public TxLogServer {
   // construction installs SystemRaftClock; the in-memory harness replaces it
   // before recording startup time.
   rusty::Option<raft::RaftClockProxy> clock_{rusty::None};
+  rusty::Option<uint64_t> in_memory_election_timeout_us_{rusty::None};
 
   raft::RaftClockProxy& clock() {
     verify(clock_.is_some());
@@ -1887,6 +1891,7 @@ class RaftServer : public TxLogServer {
    */
   // @safe - election timeout calculation (external calls wrapped in @unsafe blocks)
   uint64_t GetElectionTimeout();
+  bool CheckElectionTimeoutOnce(uint64_t now_us);
  public:
   // @unsafe - returns borrowed communicator pointer from TxLogServer base.
   // The owning RaftFrame/RaftWorker lifetime must outlive this server use.
@@ -1936,6 +1941,7 @@ class RaftServer : public TxLogServer {
     loc_id_ = deps.loc_id;
     partition_id_ = deps.partition_id;
     clock_ = rusty::Some(std::move(deps.clock));
+    in_memory_election_timeout_us_ = std::move(deps.election_timeout_us);
     transport_ = rusty::Some(std::move(deps.transport));
     log_storage_ = janus::raft::make_log_storage_proxy(std::move(deps.storage));
     snapshot_manager_ =
@@ -1960,6 +1966,12 @@ class RaftServer : public TxLogServer {
   // @unsafe - runs the existing election path synchronously for the
   // in-memory harness. The configured transport and peer set are required.
   bool StartElectionForInMemoryTest() { return RequestVote(); }
+
+  // Checks one election deadline without creating a production timer fiber.
+  // TestCluster invokes this only on the owning PollThread.
+  bool DriveElectionTimerOnceForInMemoryTest() {
+    return CheckElectionTimeoutOnce(clock()->now_us());
+  }
 
   // Runs one deterministic heartbeat/replication round without creating the
   // production HeartbeatLoop fiber. It uses the same channel transport and

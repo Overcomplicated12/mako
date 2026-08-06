@@ -9,6 +9,8 @@
 #include <rusty/function.hpp>
 #include <rusty/arc.hpp>
 #include <rusty/cell.hpp>
+#include <rusty/mutex.hpp>
+#include <rusty/rusty.hpp>
 #include <rusty/slice.hpp>
 
 // @external: {

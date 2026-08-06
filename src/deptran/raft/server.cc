@@ -737,6 +737,9 @@ void RaftServer::OnJetpackPullCmd(const epoch_t& jepoch,
 
 // @unsafe - Election timeout calculation (RandomGenerator::rand marked safe via @external)
 uint64_t RaftServer::GetElectionTimeout() {
+  if (in_memory_election_timeout_us_.is_some()) {
+    return in_memory_election_timeout_us_.as_ref().unwrap();
+  }
   uint64_t current_time = clock()->now_us();
   const uint64_t grace_period_us = GetPreferredLeaderGracePeriodUs();
   bool in_grace_period = server_election_in_startup_grace_period(
@@ -756,6 +759,31 @@ uint64_t RaftServer::GetElectionTimeout() {
   } else {
     return GetNonPreferredSteadyElectionTimeoutUs();
   }
+}
+
+// @unsafe - preserves the existing RequestVote path, which may perform
+// channel/RPC work. Callers must run this on the server's PollThread.
+bool RaftServer::CheckElectionTimeoutOnce(uint64_t now_us) {
+  const uint64_t election_timeout = GetElectionTimeout();
+  const uint64_t time_elapsed = now_us - last_heartbeat_time_;
+
+  if (!server_election_timeout_has_fired(
+          IsLeader(), time_elapsed, election_timeout)) {
+    return false;
+  }
+
+  Log_info("[ELECTION_TIMER] Site {}: TIMEOUT FIRED - starting election "
+           "(elapsed={} > timeout={})",
+           site_id_, time_elapsed, election_timeout);
+  vote_core_.set_req_voting(true);
+  Log_info("[ELECTION_START] Site {}: TRIGGERING REQUESTVOTE - "
+           "time_elapsed={} > timeout={} last_hb={} current_term={} "
+           "vote_for={}",
+           site_id_, time_elapsed, election_timeout, last_heartbeat_time_,
+           currentTerm, vote_core_.vote_for());
+  if (stop_) return false;
+  (void)RequestVote();
+  return true;
 }
 
 // StartApplyFiber - lightweight status monitor on PollThread.
@@ -2557,9 +2585,6 @@ void RaftServer::StartElectionTimer() {
     Log_debug("start timer for election") ;
 
     while(!stop_) {
-      // Use dynamic election timeout based on preferred replica role and grace period
-      uint64_t election_timeout = GetElectionTimeout();
-
       // Sleep for a portion of the timeout before checking
       uint64_t heartbeat_interval_us = tuning_core_.heartbeat_interval_us();
       Fiber::sleep(RandomGenerator::rand(heartbeat_interval_us * 2,
@@ -2573,26 +2598,7 @@ void RaftServer::StartElectionTimer() {
         c->RetryPendingNotifyRestart();
       }
 
-      auto time_now = clock()->now_us();
-      auto time_elapsed = time_now - last_heartbeat_time_;
-
-      // Only log when timeout actually fires or when debugging
-      // Log_info("[ELECTION_TIMER] Site {}: checking - is_leader={} time_elapsed={} election_timeout={} last_hb_time={}",
-      //          site_id_, IsLeader(), time_elapsed, election_timeout, last_heartbeat_time_);
-
-      if (server_election_timeout_has_fired(
-              IsLeader(), time_elapsed, election_timeout)) {
-        Log_info("[ELECTION_TIMER] Site {}: TIMEOUT FIRED - starting election (elapsed={} > timeout={})",
-                 site_id_, time_elapsed, election_timeout);
-
-        // ask to vote
-        vote_core_.set_req_voting(true );
-        Log_info("[ELECTION_START] Site {}: TRIGGERING REQUESTVOTE - time_elapsed={} > timeout={} last_hb={} current_term={} vote_for={}",
-                 site_id_, time_elapsed, election_timeout, last_heartbeat_time_, currentTerm, vote_core_.vote_for());
-        // CRITICAL: Check stop_ before calling RequestVote() to prevent
-        // calling through collapsed vtable after object destruction
-        if (stop_) return;
-        RequestVote() ;
+      if (CheckElectionTimeoutOnce(clock()->now_us())) {
         while(vote_core_.req_voting()) {
           Fiber::sleep(wait_int_);
           if(stop_) return ;

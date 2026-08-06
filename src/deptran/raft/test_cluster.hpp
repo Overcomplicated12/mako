@@ -30,6 +30,7 @@
 #include <rusty/option.hpp>
 
 #include "channel_transport.hpp"
+#include "clock.hpp"
 #include "test_cluster_facade.hpp"
 #include "../classic/tpc_command.h"
 #include "memory_log_storage.hpp"
@@ -168,6 +169,27 @@ class TestCluster : public TestClusterFacade {
       return result->load(std::memory_order_acquire);
     }
     return false;
+  }
+
+  // @safe - advances the shared in-memory monotonic clock. This never wakes
+  // production fibers; tests pair it with step_election_timers().
+  uint64_t advance_time_by_us(uint64_t delta_us) override {
+    return clock_->advance_by_us(delta_us);
+  }
+
+  // @safe - runs exactly one deadline check on each live, connected server's
+  // own PollThread. A timeout may start an election; a false result only means
+  // scheduling one of those deterministic jobs failed.
+  bool step_election_timers() override {
+    for (size_t i = 0; i < nodes_.size(); ++i) {
+      if (dead_[i] || isolated_[i]) continue;
+      if (!run_on_poll_thread(i, [server = nodes_[i]->server()]() {
+            (void)server->DriveElectionTimerOnceForInMemoryTest();
+          })) {
+        return false;
+      }
+    }
+    return true;
   }
 
   // @safe - count the live servers currently reporting leadership.
@@ -358,9 +380,10 @@ class TestCluster : public TestClusterFacade {
     auto server = std::make_unique<RaftServer>(nullptr);
     server->InitializeForInMemoryTest(RaftServerInMemoryTestDependencies{
         site_ids_[i], static_cast<locid_t>(site_ids_[i]), /*partition=*/0,
-        site_ids_, make_system_raft_clock(),
+        site_ids_, make_manual_raft_clock(clock_.clone()),
         make_channel_transport(&sw_, site_ids_[i], /*par=*/0),
-        logs_[i], snaps_[i]});
+        logs_[i], snaps_[i],
+        rusty::Option<uint64_t>(150 + (100 * i))});
     return server;
   }
 
@@ -423,6 +446,8 @@ class TestCluster : public TestClusterFacade {
   // let every worker's step_blocking() recv() return Err before the
   // workers' Receivers are destroyed. Otherwise detached worker
   // threads UAF on their receivers.
+  // Must outlive nodes, servers, workers, and their PollThread actions.
+  rusty::Arc<ManualRaftClock>                    clock_{rusty::Arc<ManualRaftClock>::make(0)};
   std::atomic<bool>                              stop_{false};
   std::vector<std::thread>                       worker_threads_;
   std::vector<rusty::Option<rusty::Arc<rrr::PollThread>>> poll_threads_;
