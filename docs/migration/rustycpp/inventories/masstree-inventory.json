@@ -1,0 +1,3587 @@
+{
+  "declarations": [
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 45,
+      "file": "src/masstree/checkpoint.hh",
+      "kind": "struct",
+      "line": 26,
+      "loc": 20,
+      "name": "ckstate",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 42,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "raw-pointer",
+        "threading",
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 175,
+      "file": "src/masstree/circular_int.hh",
+      "kind": "class",
+      "line": 26,
+      "loc": 150,
+      "name": "circular_int",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 80,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "large-body",
+        "raw-pointer",
+        "static-state",
+        "template",
+        "threading"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 177,
+      "file": "src/masstree/circular_int.hh",
+      "kind": "typedef",
+      "line": 177,
+      "loc": 1,
+      "name": "kvepoch_t",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 45,
+      "file": "src/masstree/clp.h",
+      "kind": "typedef",
+      "line": 45,
+      "loc": 1,
+      "name": "Clp_Option",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 46,
+      "file": "src/masstree/clp.h",
+      "kind": "typedef",
+      "line": 46,
+      "loc": 1,
+      "name": "Clp_Parser",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 47,
+      "file": "src/masstree/clp.h",
+      "kind": "typedef",
+      "line": 47,
+      "loc": 1,
+      "name": "Clp_ParserState",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "refactor-then-DSL",
+      "end_line": 65,
+      "file": "src/masstree/clp.h",
+      "kind": "struct",
+      "line": 55,
+      "loc": 11,
+      "name": "Clp_Option",
+      "phase": "reshape",
+      "priority": 48,
+      "risk": "low",
+      "risk_score": 12,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "void*",
+        "raw-pointer"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 224,
+      "file": "src/masstree/clp.h",
+      "kind": "struct",
+      "line": 192,
+      "loc": 33,
+      "name": "Clp_Parser",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 47,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "void*"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "operator-overload"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 140,
+      "file": "src/masstree/compiler.hh",
+      "kind": "struct",
+      "line": 131,
+      "loc": 10,
+      "name": "do_nothing",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 35,
+      "rust_blocks": 0,
+      "signals": [
+        "operator-overload",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "operator-overload"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 147,
+      "file": "src/masstree/compiler.hh",
+      "kind": "struct",
+      "line": 143,
+      "loc": 5,
+      "name": "fence_function",
+      "phase": "probe",
+      "priority": 15,
+      "risk": "low",
+      "risk_score": 15,
+      "rust_blocks": 0,
+      "signals": [
+        "operator-overload"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "operator-overload"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 154,
+      "file": "src/masstree/compiler.hh",
+      "kind": "struct",
+      "line": 150,
+      "loc": 5,
+      "name": "relax_fence_function",
+      "phase": "probe",
+      "priority": 15,
+      "risk": "low",
+      "risk_score": 15,
+      "rust_blocks": 0,
+      "signals": [
+        "operator-overload"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "operator-overload"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 168,
+      "file": "src/masstree/compiler.hh",
+      "kind": "struct",
+      "line": 157,
+      "loc": 12,
+      "name": "backoff_fence_function",
+      "phase": "probe",
+      "priority": 15,
+      "risk": "low",
+      "risk_score": 15,
+      "rust_blocks": 0,
+      "signals": [
+        "operator-overload"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 174,
+      "file": "src/masstree/compiler.hh",
+      "kind": "typedef",
+      "line": 174,
+      "loc": 1,
+      "name": "type",
+      "phase": "probe",
+      "priority": 10,
+      "risk": "medium",
+      "risk_score": 20,
+      "rust_blocks": 0,
+      "signals": [
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 439,
+      "file": "src/masstree/compiler.hh",
+      "kind": "typedef",
+      "line": 439,
+      "loc": 1,
+      "name": "sco_t",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 606,
+      "file": "src/masstree/compiler.hh",
+      "kind": "typedef",
+      "line": 606,
+      "loc": 1,
+      "name": "cacheline_t",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "operator-overload",
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 633,
+      "file": "src/masstree/compiler.hh",
+      "kind": "struct",
+      "line": 630,
+      "loc": 4,
+      "name": "value_prefetcher",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 35,
+      "rust_blocks": 0,
+      "signals": [
+        "operator-overload",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 1054,
+      "file": "src/masstree/compiler.hh",
+      "kind": "using",
+      "line": 1054,
+      "loc": 1,
+      "name": "integral_constant",
+      "phase": "probe",
+      "priority": 10,
+      "risk": "medium",
+      "risk_score": 20,
+      "rust_blocks": 0,
+      "signals": [
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 1055,
+      "file": "src/masstree/compiler.hh",
+      "kind": "typedef",
+      "line": 1055,
+      "loc": 1,
+      "name": "true_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 1056,
+      "file": "src/masstree/compiler.hh",
+      "kind": "typedef",
+      "line": 1056,
+      "loc": 1,
+      "name": "false_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 1063,
+      "file": "src/masstree/compiler.hh",
+      "kind": "struct",
+      "line": 1059,
+      "loc": 5,
+      "name": "integral_constant",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 30,
+      "rust_blocks": 0,
+      "signals": [
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 1071,
+      "file": "src/masstree/compiler.hh",
+      "kind": "using",
+      "line": 1071,
+      "loc": 1,
+      "name": "conditional",
+      "phase": "probe",
+      "priority": 10,
+      "risk": "medium",
+      "risk_score": 20,
+      "rust_blocks": 0,
+      "signals": [
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 1205,
+      "file": "src/masstree/compiler.hh",
+      "kind": "typedef",
+      "line": 1205,
+      "loc": 1,
+      "name": "enable_rvalue_reference",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 1221,
+      "file": "src/masstree/compiler.hh",
+      "kind": "struct",
+      "line": 1219,
+      "loc": 3,
+      "name": "has_fast_int_multiply",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 35,
+      "rust_blocks": 0,
+      "signals": [
+        "inheritance",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 1271,
+      "file": "src/masstree/compiler.hh",
+      "kind": "struct",
+      "line": 1271,
+      "loc": 1,
+      "name": "uninitialized_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 39,
+      "file": "src/masstree/hashcode.hh",
+      "kind": "typedef",
+      "line": 39,
+      "loc": 1,
+      "name": "hashcode_t",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "void*",
+        "template",
+        "operator-overload",
+        "raw-pointer"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 425,
+      "file": "src/masstree/json.hh",
+      "kind": "class",
+      "line": 48,
+      "loc": 378,
+      "name": "Json",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 100,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "large-body",
+        "nested-type",
+        "operator-overload",
+        "raw-pointer",
+        "static-state",
+        "template",
+        "void*"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "refactor-then-DSL",
+      "end_line": 438,
+      "file": "src/masstree/json.hh",
+      "kind": "struct",
+      "line": 428,
+      "loc": 11,
+      "name": "Json",
+      "phase": "reshape",
+      "priority": 23,
+      "risk": "medium",
+      "risk_score": 37,
+      "rust_blocks": 0,
+      "signals": [
+        "inheritance",
+        "raw-pointer",
+        "static-state"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 530,
+      "file": "src/masstree/json.hh",
+      "kind": "typedef",
+      "line": 530,
+      "loc": 1,
+      "name": "value_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "review-manually",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 531,
+      "file": "src/masstree/json.hh",
+      "kind": "typedef",
+      "line": 531,
+      "loc": 1,
+      "name": "pointer_type",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "low",
+      "risk_score": 12,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 532,
+      "file": "src/masstree/json.hh",
+      "kind": "typedef",
+      "line": 532,
+      "loc": 1,
+      "name": "reference_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 533,
+      "file": "src/masstree/json.hh",
+      "kind": "typedef",
+      "line": 533,
+      "loc": 1,
+      "name": "iterator_category",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "review-manually",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 537,
+      "file": "src/masstree/json.hh",
+      "kind": "typedef",
+      "line": 537,
+      "loc": 1,
+      "name": "const",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "low",
+      "risk_score": 12,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 617,
+      "file": "src/masstree/json.hh",
+      "kind": "typedef",
+      "line": 617,
+      "loc": 1,
+      "name": "difference_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "review-manually",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 619,
+      "file": "src/masstree/json.hh",
+      "kind": "typedef",
+      "line": 619,
+      "loc": 1,
+      "name": "pointer",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "low",
+      "risk_score": 12,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 620,
+      "file": "src/masstree/json.hh",
+      "kind": "typedef",
+      "line": 620,
+      "loc": 1,
+      "name": "reference",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "operator-overload",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 1332,
+      "file": "src/masstree/json.hh",
+      "kind": "class",
+      "line": 879,
+      "loc": 454,
+      "name": "Json_proxy_base",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 57,
+      "rust_blocks": 0,
+      "signals": [
+        "large-body",
+        "operator-overload",
+        "raw-pointer",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 1362,
+      "file": "src/masstree/json.hh",
+      "kind": "class",
+      "line": 1335,
+      "loc": 28,
+      "name": "Json_object_proxy",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 35,
+      "rust_blocks": 0,
+      "signals": [
+        "inheritance",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 1392,
+      "file": "src/masstree/json.hh",
+      "kind": "class",
+      "line": 1365,
+      "loc": 28,
+      "name": "Json_object_str_proxy",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 35,
+      "rust_blocks": 0,
+      "signals": [
+        "inheritance",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 1422,
+      "file": "src/masstree/json.hh",
+      "kind": "class",
+      "line": 1395,
+      "loc": 28,
+      "name": "Json_array_proxy",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 35,
+      "rust_blocks": 0,
+      "signals": [
+        "inheritance",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "refactor-then-DSL",
+      "end_line": 1449,
+      "file": "src/masstree/json.hh",
+      "kind": "class",
+      "line": 1424,
+      "loc": 26,
+      "name": "Json_get_proxy",
+      "phase": "reshape",
+      "priority": 33,
+      "risk": "medium",
+      "risk_score": 27,
+      "rust_blocks": 0,
+      "signals": [
+        "inheritance",
+        "raw-pointer"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 1606,
+      "file": "src/masstree/json.hh",
+      "kind": "struct",
+      "line": 1600,
+      "loc": 7,
+      "name": "Json_iterator_initializer",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 30,
+      "rust_blocks": 0,
+      "signals": [
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "operator-overload"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 48,
+      "file": "src/masstree/kpermuter.hh",
+      "kind": "class",
+      "line": 24,
+      "loc": 25,
+      "name": "identity_kpermuter",
+      "phase": "probe",
+      "priority": 15,
+      "risk": "low",
+      "risk_score": 15,
+      "rust_blocks": 0,
+      "signals": [
+        "operator-overload"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 52,
+      "file": "src/masstree/kpermuter.hh",
+      "kind": "typedef",
+      "line": 52,
+      "loc": 1,
+      "name": "storage_type",
+      "phase": "probe",
+      "priority": 10,
+      "risk": "medium",
+      "risk_score": 20,
+      "rust_blocks": 0,
+      "signals": [
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 53,
+      "file": "src/masstree/kpermuter.hh",
+      "kind": "typedef",
+      "line": 53,
+      "loc": 1,
+      "name": "value_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 70,
+      "file": "src/masstree/kpermuter.hh",
+      "kind": "typedef",
+      "line": 70,
+      "loc": 1,
+      "name": "info",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 343,
+      "file": "src/masstree/kpermuter.hh",
+      "kind": "typedef",
+      "line": 343,
+      "loc": 1,
+      "name": "type",
+      "phase": "probe",
+      "priority": 10,
+      "risk": "medium",
+      "risk_score": 20,
+      "rust_blocks": 0,
+      "signals": [
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "operator-overload",
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 30,
+      "file": "src/masstree/ksearch.hh",
+      "kind": "struct",
+      "line": 25,
+      "loc": 6,
+      "name": "key_comparator",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 35,
+      "rust_blocks": 0,
+      "signals": [
+        "operator-overload",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [],
+      "bucket": "refactor-then-DSL",
+      "end_line": 42,
+      "file": "src/masstree/ksearch.hh",
+      "kind": "struct",
+      "line": 32,
+      "loc": 11,
+      "name": "key_indexed_position",
+      "phase": "reshape",
+      "priority": 50,
+      "risk": "low",
+      "risk_score": 10,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 154,
+      "file": "src/masstree/ksearch.hh",
+      "kind": "struct",
+      "line": 137,
+      "loc": 18,
+      "name": "key_bound_binary",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 30,
+      "rust_blocks": 0,
+      "signals": [
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 173,
+      "file": "src/masstree/ksearch.hh",
+      "kind": "struct",
+      "line": 156,
+      "loc": 18,
+      "name": "key_bound_linear",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 30,
+      "rust_blocks": 0,
+      "signals": [
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 183,
+      "file": "src/masstree/ksearch.hh",
+      "kind": "typedef",
+      "line": 183,
+      "loc": 1,
+      "name": "type",
+      "phase": "probe",
+      "priority": 10,
+      "risk": "medium",
+      "risk_score": 20,
+      "rust_blocks": 0,
+      "signals": [
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "refactor-then-DSL",
+      "end_line": 40,
+      "file": "src/masstree/kvio.hh",
+      "kind": "struct",
+      "line": 28,
+      "loc": 13,
+      "name": "kvout",
+      "phase": "reshape",
+      "priority": 48,
+      "risk": "low",
+      "risk_score": 12,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 44,
+      "file": "src/masstree/kvproto.hh",
+      "kind": "enum",
+      "line": 36,
+      "loc": 9,
+      "name": "result_t",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 49,
+      "file": "src/masstree/kvproto.hh",
+      "kind": "enum",
+      "line": 46,
+      "loc": 4,
+      "name": "ckptrav_order_t",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 54,
+      "file": "src/masstree/kvproto.hh",
+      "kind": "struct",
+      "line": 51,
+      "loc": 4,
+      "name": "row_marker",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "refactor-then-DSL",
+      "end_line": 45,
+      "file": "src/masstree/kvrandom.hh",
+      "kind": "class",
+      "line": 26,
+      "loc": 20,
+      "name": "kvrandom_lcg_nr_simple",
+      "phase": "reshape",
+      "priority": 38,
+      "risk": "medium",
+      "risk_score": 22,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "raw-pointer"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [],
+      "bucket": "refactor-then-DSL",
+      "end_line": 58,
+      "file": "src/masstree/kvrandom.hh",
+      "kind": "class",
+      "line": 50,
+      "loc": 9,
+      "name": "kvrandom_lcg_nr",
+      "phase": "reshape",
+      "priority": 45,
+      "risk": "low",
+      "risk_score": 15,
+      "rust_blocks": 0,
+      "signals": [
+        "inheritance"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "operator-overload"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 91,
+      "file": "src/masstree/kvrandom.hh",
+      "kind": "class",
+      "line": 61,
+      "loc": 31,
+      "name": "kvrandom_psdes_nr",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 35,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "operator-overload",
+        "static-state"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 103,
+      "file": "src/masstree/kvrandom.hh",
+      "kind": "class",
+      "line": 94,
+      "loc": 10,
+      "name": "kvrandom_random",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 31,
+      "file": "src/masstree/kvrow.hh",
+      "kind": "typedef",
+      "line": 31,
+      "loc": 1,
+      "name": "row_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 49,
+      "file": "src/masstree/kvrow.hh",
+      "kind": "struct",
+      "line": 44,
+      "loc": 6,
+      "name": "query_helper",
+      "phase": "probe",
+      "priority": 10,
+      "risk": "medium",
+      "risk_score": 20,
+      "rust_blocks": 0,
+      "signals": [
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 98,
+      "file": "src/masstree/kvrow.hh",
+      "kind": "class",
+      "line": 54,
+      "loc": 45,
+      "name": "query",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 32,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "template",
+        "I/O-or-FFI"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 318,
+      "file": "src/masstree/kvrow.hh",
+      "kind": "class",
+      "line": 282,
+      "loc": 37,
+      "name": "query_json_scanner",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 40,
+      "rust_blocks": 0,
+      "signals": [
+        "I/O-or-FFI",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "refactor-then-DSL",
+      "end_line": 56,
+      "file": "src/masstree/kvstats.hh",
+      "kind": "struct",
+      "line": 24,
+      "loc": 33,
+      "name": "kvstats",
+      "phase": "reshape",
+      "priority": 48,
+      "risk": "low",
+      "risk_score": 12,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 37,
+      "file": "src/masstree/kvthread.hh",
+      "kind": "typedef",
+      "line": 37,
+      "loc": 1,
+      "name": "mrcu_epoch_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 38,
+      "file": "src/masstree/kvthread.hh",
+      "kind": "typedef",
+      "line": 38,
+      "loc": 1,
+      "name": "mrcu_signed_epoch_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "void*",
+        "raw-pointer"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 49,
+      "file": "src/masstree/kvthread.hh",
+      "kind": "struct",
+      "line": 45,
+      "loc": 5,
+      "name": "limbo_element",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 47,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "void*"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "void*",
+        "raw-pointer"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 67,
+      "file": "src/masstree/kvthread.hh",
+      "kind": "struct",
+      "line": 51,
+      "loc": 17,
+      "name": "limbo_group",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 47,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "void*"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "operator-overload"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 84,
+      "file": "src/masstree/kvthread.hh",
+      "kind": "struct",
+      "line": 80,
+      "loc": 5,
+      "name": "mrcu_callback",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 35,
+      "rust_blocks": 0,
+      "signals": [
+        "operator-overload",
+        "virtual-dispatch"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "void*",
+        "template",
+        "operator-overload",
+        "raw-pointer",
+        "threading"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 397,
+      "file": "src/masstree/kvthread.hh",
+      "kind": "class",
+      "line": 86,
+      "loc": 312,
+      "name": "threadinfo",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 100,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "large-body",
+        "mutable-state",
+        "nested-type",
+        "operator-overload",
+        "raw-pointer",
+        "static-state",
+        "template",
+        "threading",
+        "void*"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 41,
+      "file": "src/masstree/masstree.hh",
+      "kind": "typedef",
+      "line": 41,
+      "loc": 1,
+      "name": "ikey_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 42,
+      "file": "src/masstree/masstree.hh",
+      "kind": "typedef",
+      "line": 42,
+      "loc": 1,
+      "name": "nodeversion_value_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 44,
+      "file": "src/masstree/masstree.hh",
+      "kind": "typedef",
+      "line": 44,
+      "loc": 1,
+      "name": "phantom_epoch_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 127,
+      "file": "src/masstree/masstree.hh",
+      "kind": "class",
+      "line": 61,
+      "loc": 67,
+      "name": "basic_table",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 42,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "raw-pointer",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 22,
+      "file": "src/masstree/masstree_context.h",
+      "kind": "typedef",
+      "line": 22,
+      "loc": 1,
+      "name": "mrcu_epoch_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "threading",
+        "I/O-or-FFI"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 113,
+      "file": "src/masstree/masstree_context.h",
+      "kind": "class",
+      "line": 53,
+      "loc": 61,
+      "name": "MasstreeContext",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 68,
+      "rust_blocks": 0,
+      "signals": [
+        "I/O-or-FFI",
+        "constructor-overloads",
+        "mutable-state",
+        "static-state",
+        "threading"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "raw-pointer",
+        "I/O-or-FFI",
+        "template"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 268,
+      "file": "src/masstree/masstree_key.hh",
+      "kind": "class",
+      "line": 40,
+      "loc": 229,
+      "name": "key",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 92,
+      "rust_blocks": 0,
+      "signals": [
+        "I/O-or-FFI",
+        "constructor-overloads",
+        "large-body",
+        "mutable-state",
+        "raw-pointer",
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "raw-pointer",
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 35,
+      "file": "src/masstree/masstree_print.hh",
+      "kind": "class",
+      "line": 28,
+      "loc": 8,
+      "name": "value_print",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 42,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "operator-overload",
+        "raw-pointer",
+        "I/O-or-FFI",
+        "template"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 123,
+      "file": "src/masstree/masstree_remove.hh",
+      "kind": "struct",
+      "line": 109,
+      "loc": 15,
+      "name": "gc_layer_rcu_callback",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 92,
+      "rust_blocks": 0,
+      "signals": [
+        "I/O-or-FFI",
+        "inheritance",
+        "operator-overload",
+        "raw-pointer",
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "operator-overload",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 309,
+      "file": "src/masstree/masstree_remove.hh",
+      "kind": "struct",
+      "line": 295,
+      "loc": 15,
+      "name": "destroy_rcu_callback",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 52,
+      "rust_blocks": 0,
+      "signals": [
+        "inheritance",
+        "operator-overload",
+        "raw-pointer",
+        "static-state"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "operator-overload"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 92,
+      "file": "src/masstree/masstree_scan.hh",
+      "kind": "class",
+      "line": 28,
+      "loc": 65,
+      "name": "scanstackelt",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 35,
+      "rust_blocks": 0,
+      "signals": [
+        "operator-overload",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 126,
+      "file": "src/masstree/masstree_scan.hh",
+      "kind": "struct",
+      "line": 94,
+      "loc": 33,
+      "name": "forward_scan_helper",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 32,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 191,
+      "file": "src/masstree/masstree_scan.hh",
+      "kind": "struct",
+      "line": 128,
+      "loc": 64,
+      "name": "reverse_scan_helper",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 42,
+      "rust_blocks": 0,
+      "signals": [
+        "mutable-state",
+        "raw-pointer",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 328,
+      "file": "src/masstree/masstree_scan.hh",
+      "kind": "typedef",
+      "line": 328,
+      "loc": 1,
+      "name": "ikey_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 329,
+      "file": "src/masstree/masstree_scan.hh",
+      "kind": "typedef",
+      "line": 329,
+      "loc": 1,
+      "name": "key_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 330,
+      "file": "src/masstree/masstree_scan.hh",
+      "kind": "typedef",
+      "line": 330,
+      "loc": 1,
+      "name": "leafvalue_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 339,
+      "file": "src/masstree/masstree_scan.hh",
+      "kind": "typedef",
+      "line": 339,
+      "loc": 1,
+      "name": "mystack_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 35,
+      "file": "src/masstree/masstree_struct.hh",
+      "kind": "struct",
+      "line": 30,
+      "loc": 6,
+      "name": "make_nodeversion",
+      "phase": "probe",
+      "priority": 10,
+      "risk": "medium",
+      "risk_score": 20,
+      "rust_blocks": 0,
+      "signals": [
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 42,
+      "file": "src/masstree/masstree_struct.hh",
+      "kind": "struct",
+      "line": 38,
+      "loc": 5,
+      "name": "make_prefetcher",
+      "phase": "probe",
+      "priority": 10,
+      "risk": "medium",
+      "risk_score": 20,
+      "rust_blocks": 0,
+      "signals": [
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "raw-pointer",
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 111,
+      "file": "src/masstree/masstree_struct.hh",
+      "kind": "class",
+      "line": 45,
+      "loc": 67,
+      "name": "node_base",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 57,
+      "rust_blocks": 0,
+      "signals": [
+        "inheritance",
+        "raw-pointer",
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "void*",
+        "template",
+        "raw-pointer",
+        "I/O-or-FFI"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 219,
+      "file": "src/masstree/masstree_struct.hh",
+      "kind": "class",
+      "line": 114,
+      "loc": 106,
+      "name": "internode",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 100,
+      "rust_blocks": 0,
+      "signals": [
+        "I/O-or-FFI",
+        "inheritance",
+        "raw-pointer",
+        "static-state",
+        "template",
+        "void*"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "refactor-then-DSL",
+      "end_line": 283,
+      "file": "src/masstree/masstree_struct.hh",
+      "kind": "class",
+      "line": 223,
+      "loc": 61,
+      "name": "leafvalue",
+      "phase": "reshape",
+      "priority": 18,
+      "risk": "high",
+      "risk_score": 42,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "mutable-state",
+        "raw-pointer",
+        "static-state"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "void*",
+        "template",
+        "operator-overload",
+        "raw-pointer"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 615,
+      "file": "src/masstree/masstree_struct.hh",
+      "kind": "class",
+      "line": 286,
+      "loc": 330,
+      "name": "leaf",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 100,
+      "rust_blocks": 0,
+      "signals": [
+        "inheritance",
+        "large-body",
+        "operator-overload",
+        "raw-pointer",
+        "static-state",
+        "template",
+        "void*"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "raw-pointer",
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 98,
+      "file": "src/masstree/masstree_tcursor.hh",
+      "kind": "class",
+      "line": 30,
+      "loc": 69,
+      "name": "unlocked_tcursor",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 42,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "raw-pointer",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "raw-pointer",
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 218,
+      "file": "src/masstree/masstree_tcursor.hh",
+      "kind": "class",
+      "line": 101,
+      "loc": 118,
+      "name": "tcursor",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 52,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "raw-pointer",
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "void*",
+        "raw-pointer"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 67,
+      "file": "src/masstree/memdebug.hh",
+      "kind": "struct",
+      "line": 25,
+      "loc": 43,
+      "name": "memdebug",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 57,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "static-state",
+        "void*"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "refactor-then-DSL",
+      "end_line": 86,
+      "file": "src/masstree/misc.hh",
+      "kind": "struct",
+      "line": 56,
+      "loc": 31,
+      "name": "quick_istr",
+      "phase": "reshape",
+      "priority": 38,
+      "risk": "medium",
+      "risk_score": 22,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "raw-pointer"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 217,
+      "file": "src/masstree/msgpack.hh",
+      "kind": "struct",
+      "line": 212,
+      "loc": 6,
+      "name": "array_t",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 228,
+      "file": "src/masstree/msgpack.hh",
+      "kind": "struct",
+      "line": 223,
+      "loc": 6,
+      "name": "object_t",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "template",
+        "operator-overload",
+        "raw-pointer",
+        "I/O-or-FFI"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 344,
+      "file": "src/masstree/msgpack.hh",
+      "kind": "class",
+      "line": 236,
+      "loc": 109,
+      "name": "unparser",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 77,
+      "rust_blocks": 0,
+      "signals": [
+        "I/O-or-FFI",
+        "constructor-overloads",
+        "operator-overload",
+        "raw-pointer",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "refactor-then-DSL",
+      "end_line": 381,
+      "file": "src/masstree/msgpack.hh",
+      "kind": "class",
+      "line": 347,
+      "loc": 35,
+      "name": "streaming_parser",
+      "phase": "reshape",
+      "priority": 40,
+      "risk": "medium",
+      "risk_score": 20,
+      "rust_blocks": 0,
+      "signals": [
+        "nested-type",
+        "raw-pointer"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "operator-overload",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 514,
+      "file": "src/masstree/msgpack.hh",
+      "kind": "class",
+      "line": 384,
+      "loc": 131,
+      "name": "parser",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 67,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "large-body",
+        "operator-overload",
+        "raw-pointer",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 80,
+      "file": "src/masstree/mtclient.cc",
+      "kind": "struct",
+      "line": 68,
+      "loc": 13,
+      "name": "async",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "refactor-then-DSL",
+      "end_line": 97,
+      "file": "src/masstree/mtclient.cc",
+      "kind": "struct",
+      "line": 84,
+      "loc": 14,
+      "name": "child",
+      "phase": "reshape",
+      "priority": 48,
+      "risk": "low",
+      "risk_score": 12,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "va_list",
+        "raw-pointer"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 386,
+      "file": "src/masstree/mtclient.cc",
+      "kind": "struct",
+      "line": 167,
+      "loc": 220,
+      "name": "kvtest_client",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 62,
+      "rust_blocks": 0,
+      "signals": [
+        "large-body",
+        "raw-pointer",
+        "va_list"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 771,
+      "file": "src/masstree/mtclient.cc",
+      "kind": "struct",
+      "line": 771,
+      "loc": 1,
+      "name": "timeval",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "raw-pointer",
+        "I/O-or-FFI"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 229,
+      "file": "src/masstree/mtclient.hh",
+      "kind": "class",
+      "line": 39,
+      "loc": 191,
+      "name": "KVConn",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 52,
+      "rust_blocks": 0,
+      "signals": [
+        "I/O-or-FFI",
+        "constructor-overloads",
+        "large-body",
+        "raw-pointer"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "review-manually",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 36,
+      "file": "src/masstree/mtcounters.hh",
+      "kind": "enum",
+      "line": 23,
+      "loc": 14,
+      "name": "memtag",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "low",
+      "risk_score": 12,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 62,
+      "file": "src/masstree/mtcounters.hh",
+      "kind": "enum",
+      "line": 38,
+      "loc": 25,
+      "name": "threadcounter",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "refactor-then-DSL",
+      "end_line": 303,
+      "file": "src/masstree/mtd.cc",
+      "kind": "struct",
+      "line": 191,
+      "loc": 113,
+      "name": "kvtest_client",
+      "phase": "reshape",
+      "priority": 28,
+      "risk": "medium",
+      "risk_score": 32,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "raw-pointer",
+        "static-state"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "raw-pointer",
+        "I/O-or-FFI"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 571,
+      "file": "src/masstree/mtd.cc",
+      "kind": "struct",
+      "line": 513,
+      "loc": 59,
+      "name": "conn",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 42,
+      "rust_blocks": 0,
+      "signals": [
+        "I/O-or-FFI",
+        "constructor-overloads",
+        "raw-pointer"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 591,
+      "file": "src/masstree/mtd.cc",
+      "kind": "struct",
+      "line": 591,
+      "loc": 1,
+      "name": "timeval",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 605,
+      "file": "src/masstree/mtd.cc",
+      "kind": "struct",
+      "line": 602,
+      "loc": 4,
+      "name": "conninfo",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "void*",
+        "raw-pointer"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 1094,
+      "file": "src/masstree/mtd.cc",
+      "kind": "struct",
+      "line": 1056,
+      "loc": 39,
+      "name": "tcpfds",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 47,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "void*"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "refactor-then-DSL",
+      "end_line": 1140,
+      "file": "src/masstree/mtd.cc",
+      "kind": "class",
+      "line": 1096,
+      "loc": 45,
+      "name": "tcpfds",
+      "phase": "reshape",
+      "priority": 48,
+      "risk": "low",
+      "risk_score": 12,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 151,
+      "file": "src/masstree/mttest.cc",
+      "kind": "struct",
+      "line": 148,
+      "loc": 4,
+      "name": "mttest_numainfo",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "raw-pointer",
+        "threading",
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 360,
+      "file": "src/masstree/mttest.cc",
+      "kind": "struct",
+      "line": 173,
+      "loc": 188,
+      "name": "kvtest_client",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 80,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "large-body",
+        "raw-pointer",
+        "static-state",
+        "template",
+        "threading"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "void*",
+        "raw-pointer",
+        "template"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 694,
+      "file": "src/masstree/mttest.cc",
+      "kind": "struct",
+      "line": 603,
+      "loc": 92,
+      "name": "test_thread",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 87,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "raw-pointer",
+        "static-state",
+        "template",
+        "void*"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 698,
+      "file": "src/masstree/mttest.cc",
+      "kind": "typedef",
+      "line": 698,
+      "loc": 1,
+      "name": "masstree_test_thread",
+      "phase": "probe",
+      "priority": 10,
+      "risk": "medium",
+      "risk_score": 20,
+      "rust_blocks": 0,
+      "signals": [
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "refactor-then-DSL",
+      "end_line": 1169,
+      "file": "src/masstree/mttest.cc",
+      "kind": "struct",
+      "line": 1150,
+      "loc": 20,
+      "name": "gnuplot_info",
+      "phase": "reshape",
+      "priority": 38,
+      "risk": "medium",
+      "risk_score": 22,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "static-state"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 214,
+      "file": "src/masstree/nodeversion.hh",
+      "kind": "class",
+      "line": 25,
+      "loc": 190,
+      "name": "nodeversion",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 52,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "large-body",
+        "raw-pointer",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 354,
+      "file": "src/masstree/nodeversion.hh",
+      "kind": "class",
+      "line": 218,
+      "loc": 137,
+      "name": "singlethreaded_nodeversion",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 52,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "large-body",
+        "raw-pointer",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 377,
+      "file": "src/masstree/nodeversion.hh",
+      "kind": "typedef",
+      "line": 377,
+      "loc": 1,
+      "name": "value_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 401,
+      "file": "src/masstree/nodeversion.hh",
+      "kind": "typedef",
+      "line": 401,
+      "loc": 1,
+      "name": "nodeversion32",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [],
+      "bucket": "refactor-then-DSL",
+      "end_line": 41,
+      "file": "src/masstree/perfstat.hh",
+      "kind": "struct",
+      "line": 28,
+      "loc": 14,
+      "name": "stat",
+      "phase": "reshape",
+      "priority": 50,
+      "risk": "low",
+      "risk_score": 10,
+      "rust_blocks": 0,
+      "signals": [
+        "static-state"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 231,
+      "file": "src/masstree/query_masstree.cc",
+      "kind": "typedef",
+      "line": 231,
+      "loc": 1,
+      "name": "internode_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 232,
+      "file": "src/masstree/query_masstree.cc",
+      "kind": "typedef",
+      "line": 232,
+      "loc": 1,
+      "name": "leaf_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "template",
+        "raw-pointer",
+        "I/O-or-FFI"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 335,
+      "file": "src/masstree/query_masstree.cc",
+      "kind": "struct",
+      "line": 296,
+      "loc": 40,
+      "name": "scan_tester",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 52,
+      "rust_blocks": 0,
+      "signals": [
+        "I/O-or-FFI",
+        "raw-pointer",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "raw-pointer",
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 77,
+      "file": "src/masstree/query_masstree.hh",
+      "kind": "class",
+      "line": 30,
+      "loc": 48,
+      "name": "query_table",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 42,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "refactor-then-DSL",
+      "end_line": 83,
+      "file": "src/masstree/query_masstree.hh",
+      "kind": "struct",
+      "line": 79,
+      "loc": 5,
+      "name": "default_query_table_params",
+      "phase": "reshape",
+      "priority": 33,
+      "risk": "medium",
+      "risk_score": 27,
+      "rust_blocks": 0,
+      "signals": [
+        "inheritance",
+        "raw-pointer"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 85,
+      "file": "src/masstree/query_masstree.hh",
+      "kind": "typedef",
+      "line": 85,
+      "loc": 1,
+      "name": "default_table",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "operator-overload",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 83,
+      "file": "src/masstree/small_vector.hh",
+      "kind": "class",
+      "line": 13,
+      "loc": 71,
+      "name": "small_vector",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 75,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "nested-type",
+        "operator-overload",
+        "raw-pointer",
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "va_list",
+        "template",
+        "raw-pointer"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 150,
+      "file": "src/masstree/str.hh",
+      "kind": "struct",
+      "line": 28,
+      "loc": 123,
+      "name": "Str",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 100,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "inheritance",
+        "large-body",
+        "raw-pointer",
+        "static-state",
+        "template",
+        "va_list"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "refactor-then-DSL",
+      "end_line": 169,
+      "file": "src/masstree/str.hh",
+      "kind": "struct",
+      "line": 152,
+      "loc": 18,
+      "name": "inline_string",
+      "phase": "reshape",
+      "priority": 23,
+      "risk": "medium",
+      "risk_score": 37,
+      "rust_blocks": 0,
+      "signals": [
+        "inheritance",
+        "raw-pointer",
+        "static-state"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "va_list",
+        "template",
+        "operator-overload",
+        "raw-pointer"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 166,
+      "file": "src/masstree/straccum.hh",
+      "kind": "class",
+      "line": 37,
+      "loc": 130,
+      "name": "StringAccum",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 100,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "large-body",
+        "nested-type",
+        "operator-overload",
+        "raw-pointer",
+        "static-state",
+        "template",
+        "va_list"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 352,
+      "file": "src/masstree/string.hh",
+      "kind": "class",
+      "line": 28,
+      "loc": 325,
+      "name": "String",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 95,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "inheritance",
+        "large-body",
+        "mutable-state",
+        "nested-type",
+        "raw-pointer",
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 83,
+      "file": "src/masstree/string_base.hh",
+      "kind": "class",
+      "line": 33,
+      "loc": 51,
+      "name": "String_generic",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 42,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "operator-overload",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 418,
+      "file": "src/masstree/string_base.hh",
+      "kind": "class",
+      "line": 86,
+      "loc": 333,
+      "name": "String_base",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 75,
+      "rust_blocks": 0,
+      "signals": [
+        "large-body",
+        "nested-type",
+        "operator-overload",
+        "raw-pointer",
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 37,
+      "file": "src/masstree/string_slice.hh",
+      "kind": "union",
+      "line": 31,
+      "loc": 7,
+      "name": "union_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 40,
+      "file": "src/masstree/string_slice.hh",
+      "kind": "typedef",
+      "line": 40,
+      "loc": 1,
+      "name": "type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "operator-overload",
+        "raw-pointer",
+        "I/O-or-FFI",
+        "template"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 168,
+      "file": "src/masstree/stringbag.hh",
+      "kind": "class",
+      "line": 46,
+      "loc": 123,
+      "name": "stringbag",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 95,
+      "rust_blocks": 0,
+      "signals": [
+        "I/O-or-FFI",
+        "large-body",
+        "nested-type",
+        "operator-overload",
+        "raw-pointer",
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "void*",
+        "raw-pointer"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 67,
+      "file": "src/masstree/test_atomics.cc",
+      "kind": "struct",
+      "line": 58,
+      "loc": 10,
+      "name": "fake_threadinfo",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 57,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "static-state",
+        "void*"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 77,
+      "file": "src/masstree/test_atomics.cc",
+      "kind": "union",
+      "line": 70,
+      "loc": 8,
+      "name": "myunion",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 152,
+      "file": "src/masstree/test_atomics.cc",
+      "kind": "typedef",
+      "line": 152,
+      "loc": 1,
+      "name": "kpermuter_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 204,
+      "file": "src/masstree/test_atomics.cc",
+      "kind": "typedef",
+      "line": 204,
+      "loc": 1,
+      "name": "ss_type",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 222,
+      "file": "src/masstree/test_atomics.cc",
+      "kind": "typedef",
+      "line": 222,
+      "loc": 1,
+      "name": "bag_t",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 438,
+      "file": "src/masstree/test_atomics.cc",
+      "kind": "typedef",
+      "line": 438,
+      "loc": 1,
+      "name": "vstr_t",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 35,
+      "file": "src/masstree/test_string.cc",
+      "kind": "struct",
+      "line": 35,
+      "loc": 1,
+      "name": "UTF8",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 36,
+      "file": "src/masstree/test_string.cc",
+      "kind": "struct",
+      "line": 36,
+      "loc": 1,
+      "name": "UTF8NoNul",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 37,
+      "file": "src/masstree/test_string.cc",
+      "kind": "struct",
+      "line": 37,
+      "loc": 1,
+      "name": "Windows1252",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "raw-pointer",
+        "template"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 47,
+      "file": "src/masstree/test_string.cc",
+      "kind": "struct",
+      "line": 43,
+      "loc": 5,
+      "name": "Converter",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 42,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "refactor-then-DSL",
+      "end_line": 38,
+      "file": "src/masstree/testrunner.hh",
+      "kind": "class",
+      "line": 10,
+      "loc": 29,
+      "name": "testrunner_base",
+      "phase": "reshape",
+      "priority": 8,
+      "risk": "high",
+      "risk_score": 52,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads",
+        "raw-pointer",
+        "static-state",
+        "virtual-dispatch"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [
+        "raw-pointer"
+      ],
+      "bucket": "refactor-then-DSL",
+      "end_line": 54,
+      "file": "src/masstree/testrunner.hh",
+      "kind": "class",
+      "line": 42,
+      "loc": 13,
+      "name": "testrunner",
+      "phase": "reshape",
+      "priority": 3,
+      "risk": "high",
+      "risk_score": 57,
+      "rust_blocks": 0,
+      "signals": [
+        "inheritance",
+        "raw-pointer",
+        "static-state",
+        "virtual-dispatch"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [],
+      "bucket": "refactor-then-DSL",
+      "end_line": 62,
+      "file": "src/masstree/testrunner.hh",
+      "kind": "class",
+      "line": 58,
+      "loc": 5,
+      "name": "testrunner_",
+      "phase": "reshape",
+      "priority": 50,
+      "risk": "low",
+      "risk_score": 10,
+      "rust_blocks": 0,
+      "signals": [
+        "static-state"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "migrate-now",
+      "blockers": [],
+      "bucket": "trivial",
+      "end_line": 37,
+      "file": "src/masstree/timestamp.hh",
+      "kind": "typedef",
+      "line": 37,
+      "loc": 1,
+      "name": "kvtimestamp_t",
+      "phase": "quick-wins",
+      "priority": 100,
+      "risk": "low",
+      "risk_score": 0,
+      "rust_blocks": 0,
+      "signals": [],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 75,
+      "file": "src/masstree/value_array.hh",
+      "kind": "class",
+      "line": 28,
+      "loc": 48,
+      "name": "value_array",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 42,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 86,
+      "file": "src/masstree/value_bag.hh",
+      "kind": "class",
+      "line": 26,
+      "loc": 61,
+      "name": "value_bag",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 42,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 79,
+      "file": "src/masstree/value_string.hh",
+      "kind": "class",
+      "line": 27,
+      "loc": 53,
+      "name": "value_string",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 42,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "reshape-first",
+      "blockers": [],
+      "bucket": "refactor-then-DSL",
+      "end_line": 80,
+      "file": "src/masstree/value_versioned_array.hh",
+      "kind": "struct",
+      "line": 30,
+      "loc": 51,
+      "name": "rowversion",
+      "phase": "reshape",
+      "priority": 50,
+      "risk": "low",
+      "risk_score": 10,
+      "rust_blocks": 0,
+      "signals": [
+        "constructor-overloads"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "probe-current-transpiler",
+      "blockers": [
+        "template",
+        "raw-pointer"
+      ],
+      "bucket": "needs-transpiler",
+      "end_line": 133,
+      "file": "src/masstree/value_versioned_array.hh",
+      "kind": "class",
+      "line": 82,
+      "loc": 52,
+      "name": "value_versioned_array",
+      "phase": "probe",
+      "priority": 0,
+      "risk": "high",
+      "risk_score": 42,
+      "rust_blocks": 0,
+      "signals": [
+        "raw-pointer",
+        "static-state",
+        "template"
+      ],
+      "status": "unmigrated"
+    },
+    {
+      "action": "isolate-or-probe-unsafe-boundary",
+      "blockers": [
+        "I/O-or-FFI"
+      ],
+      "bucket": "boundary-review",
+      "end_line": 151,
+      "file": "src/masstree/value_versioned_array.hh",
+      "kind": "struct",
+      "line": 137,
+      "loc": 15,
+      "name": "query_helper",
+      "phase": "floor-review",
+      "priority": 0,
+      "risk": "medium",
+      "risk_score": 20,
+      "rust_blocks": 0,
+      "signals": [
+        "I/O-or-FFI"
+      ],
+      "status": "unmigrated"
+    }
+  ],
+  "schema_version": 1
+}
