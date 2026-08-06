@@ -121,6 +121,64 @@ TEST(RaftTestClusterTest, ManualClockStepsElectionDeadline) {
   EXPECT_EQ(c->leader_count(), 1u);
 }
 
+TEST(RaftTestClusterTest, ManualClockLeaderContactResetsFollowerDeadline) {
+  auto c = TestCluster::with_in_memory_transport(3);
+
+  // Site 1 becomes leader at 151 us; a real replication round then refreshes
+  // its followers' timer baselines at that same manual-clock instant.
+  ASSERT_EQ(c->advance_time_by_us(151), 151u);
+  ASSERT_TRUE(c->step_election_timers());
+  ASSERT_TRUE(c->node_is_leader(1));
+  ASSERT_TRUE(c->step_replication());
+
+  // Site 2's fixed timeout is 250 us. It must not use its pre-contact
+  // baseline (zero): 249 us after the heartbeat is still too early.
+  ASSERT_EQ(c->advance_time_by_us(249), 400u);
+  ASSERT_TRUE(c->step_election_timers());
+  EXPECT_TRUE(c->node_is_leader(1));
+  EXPECT_FALSE(c->node_is_leader(2));
+
+  // Crossing the refreshed deadline starts a real election on site 2.
+  ASSERT_EQ(c->advance_time_by_us(2), 402u);
+  ASSERT_TRUE(c->step_election_timers());
+  EXPECT_TRUE(c->node_is_leader(2));
+  EXPECT_GT(c->node_current_term(2), 1u);
+}
+
+TEST(RaftTestClusterTest, ManualClockPartitionElectsMajoritySide) {
+  auto c = TestCluster::with_in_memory_transport(3);
+
+  ASSERT_EQ(c->advance_time_by_us(151), 151u);
+  ASSERT_TRUE(c->step_election_timers());
+  ASSERT_TRUE(c->node_is_leader(1));
+  c->partition({1}, {2, 3});
+
+  // Site 2 cannot contact the old leader, but it can still obtain site 3's
+  // vote. No wall-clock sleep or production timer fiber is involved.
+  ASSERT_EQ(c->advance_time_by_us(251), 402u);
+  ASSERT_TRUE(c->step_election_timers());
+  EXPECT_TRUE(c->node_is_leader(2));
+  EXPECT_GT(c->node_current_term(2), c->node_current_term(1));
+}
+
+TEST(RaftTestClusterTest, ManualClockRestartPreservesSharedTime) {
+  auto c = TestCluster::with_in_memory_transport(3);
+
+  ASSERT_EQ(c->advance_time_by_us(149), 149u);
+  c->kill(1);
+  c->restart(1);
+
+  // A replacement server receives an adapter to the same ManualRaftClock;
+  // restart therefore cannot silently move time back to the zero epoch.
+  EXPECT_EQ(c->advance_time_by_us(1), 150u);
+  ASSERT_TRUE(c->step_election_timers());
+  EXPECT_EQ(c->leader_count(), 0u);
+
+  EXPECT_EQ(c->advance_time_by_us(1), 151u);
+  ASSERT_TRUE(c->step_election_timers());
+  EXPECT_TRUE(c->node_is_leader(1));
+}
+
 TEST(RaftTestClusterTest, AgreementAdvancesCommitIndexOnEveryNode) {
   auto c = TestCluster::with_in_memory_transport(3);
   ASSERT_TRUE(c->step_election());

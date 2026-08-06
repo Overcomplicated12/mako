@@ -849,10 +849,24 @@ driver. Completion of the decouple plan.
   in-process. Set the env var when launching the binary or configure
   `MemoryLogStorage` to notify durable-acks synchronously.
 
-## Phase 8.8 (deferred) — `RaftClock` abstraction
+## Phase 8.8 — deterministic `RaftClock` coverage
 
-Not required for the core decouple goal. Add `RaftClock` + `ManualClock`
-if deterministic testing (advance-time-by-N-ms) becomes valuable.
+- [x] Inject a move-only `RaftClockProxy` into `RaftServer`; production uses
+  `SystemRaftClock`, while the in-memory harness shares one atomic
+  `ManualRaftClock`.
+- [x] Route all RaftServer monotonic timestamp reads through that clock and
+  retain the production timer fiber/scheduling policy unchanged.
+- [x] Add deterministic `TestCluster::advance_time_by_us()` and
+  `step_election_timers()` controls, using per-node fixed in-memory election
+  deadlines.
+- [x] Cover exact deadlines, leader-contact deadline reset, majority-side
+  re-election after partition, and clock monotonicity across restart with
+  real Raft servers and channel RPCs.
+- [x] Gate: Clang 22 focused CTest suite (`test_raft_clock`,
+  `test_raft_test_cluster`, `test_raft_channel_transport`,
+  `test_raft_quorum`, `test_raft_storage_facade`) and
+  `raft_lab_standalone` through tests 1–60 pass.
+
 Implementation plan: [Raft Phase 8.8 Clock Plan](dev/raft-phase-8.8-clock-plan.md).
 
 ---
@@ -912,4 +926,4 @@ verification. Listed here so they don't get lost.
 - [x] Phase 8.5 — TestCluster with real RaftServer
 - [x] Phase 8.6 — port RaftTestConfig to TestCluster
 - [x] Phase 8.7 — raft_lab_standalone full driver
-- [ ] Phase 8.8 — RaftClock (deferred)
+- [x] Phase 8.8 — deterministic Raft timer coverage
